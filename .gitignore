@@ -1,0 +1,53 @@
+# Python
+venv/
+.venv/
+**/.venv/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Node
+**/node_modules/
+**/dist/
+
+# Secrets / local environment
+.env
+.env.local
+.env.*.local
+
+# Model weights
+*.pt
+
+# Large videos
+*.mp4
+
+# Dataset images
+YOLO_dataset/
+test_images/
+
+# Generated batch image outputs
+batch_results/*.jpg
+batch_results/*.jpeg
+batch_results/*.png
+
+# Generated OCR/debug outputs
+final_pipeline/
+final_pipeline_easyocr/
+final_pipeline_v3/
+ocr_engine_results/
+plate_extraction/
+rectified_plate/
+
+# Old duplicate application
+license-vision-ai/
+
+# Training/runtime outputs
+runs/*
+
+# Tool caches
+.ultralytics/
+*.cache
+
+batch_results/**/*.jpg
+batch_results/**/*.jpeg
+batch_results/**/*.png

@@ -1,0 +1,832 @@
+{
+    "dataset": {
+        "total_images": 658,
+        "total_plates": 765
+    },
+    "detection": {
+        "mean_yolo_confidence": 80.16,
+        "yolo_confidence_80_plus": 417,
+        "multi_plate_images": 71
+    },
+    "ocr": {
+        "successful": 614,
+        "failed": 41,
+        "mean_confidence": 68.92,
+        "success_rate": 93.31,
+        "failure_rate": 6.23,
+        "confidence_80_plus": 339,
+        "confidence_50_plus": 472
+    },
+    "no_plate": {
+        "count": 3,
+        "rate": 0.46
+    },
+    "status_distribution": [
+        {
+            "status": "SUCCESS",
+            "count": 614
+        },
+        {
+            "status": "OCR_FAILED",
+            "count": 41
+        },
+        {
+            "status": "NO_PLATE",
+            "count": 3
+        }
+    ],
+    "plate_distribution": [
+        {
+            "plates": 0,
+            "images": 3
+        },
+        {
+            "plates": 1,
+            "images": 584
+        },
+        {
+            "plates": 2,
+            "images": 47
+        },
+        {
+            "plates": 3,
+            "images": 12
+        },
+        {
+            "plates": 4,
+            "images": 9
+        },
+        {
+            "plates": 5,
+            "images": 3
+        }
+    ],
+    "ocr_confidence_distribution": [
+        {
+            "range": "0\u201320%",
+            "count": 88
+        },
+        {
+            "range": "20\u201340%",
+            "count": 69
+        },
+        {
+            "range": "40\u201360%",
+            "count": 75
+        },
+        {
+            "range": "60\u201380%",
+            "count": 87
+        },
+        {
+            "range": "80\u2013100%",
+            "count": 339
+        }
+    ],
+    "top_results": [
+        {
+            "image": "N49.jpeg",
+            "plate_text": "HR26CH3604",
+            "yolo_confidence": 82.55,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "N67.jpeg",
+            "plate_text": "2344",
+            "yolo_confidence": 87.54,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "N70.jpeg",
+            "plate_text": "3380",
+            "yolo_confidence": 80.07,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "N77.jpeg",
+            "plate_text": "HR",
+            "yolo_confidence": 76.45,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "Cars126.png",
+            "plate_text": "KA",
+            "yolo_confidence": 90.3,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "N79.jpeg",
+            "plate_text": "4019",
+            "yolo_confidence": 76.65,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "N81.jpeg",
+            "plate_text": "GJ",
+            "yolo_confidence": 80.04,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "N8.jpeg",
+            "plate_text": "NL",
+            "yolo_confidence": 82.7,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "N9.jpeg",
+            "plate_text": "206",
+            "yolo_confidence": 92.29,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "N69.jpeg",
+            "plate_text": "46",
+            "yolo_confidence": 78.15,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "N63.jpeg",
+            "plate_text": "7099",
+            "yolo_confidence": 80.64,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "N93.jpeg",
+            "plate_text": "49",
+            "yolo_confidence": 85.66,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "N207.jpeg",
+            "plate_text": "0943",
+            "yolo_confidence": 83.48,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "Cars6.png",
+            "plate_text": "07",
+            "yolo_confidence": 94.1,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "Cars263.png",
+            "plate_text": "02",
+            "yolo_confidence": 80.78,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "N4.jpeg",
+            "plate_text": "NL",
+            "yolo_confidence": 84.46,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "Cars154.png",
+            "plate_text": "2662",
+            "yolo_confidence": 83.67,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "Cars150.png",
+            "plate_text": "4850",
+            "yolo_confidence": 80.4,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        },
+        {
+            "image": "N235.jpeg",
+            "plate_text": "05",
+            "yolo_confidence": 97.05,
+            "ocr_confidence": 100.0,
+            "plates_detected": 4
+        },
+        {
+            "image": "Cars158.png",
+            "plate_text": "695299",
+            "yolo_confidence": 90.63,
+            "ocr_confidence": 100.0,
+            "plates_detected": 1
+        }
+    ],
+    "low_confidence_results": [
+        {
+            "image": "Cars174.png",
+            "plate_text": "AC",
+            "yolo_confidence": 65.24,
+            "ocr_confidence": 0.43
+        },
+        {
+            "image": "Cars49.png",
+            "plate_text": "M028",
+            "yolo_confidence": 70.44,
+            "ocr_confidence": 1.71
+        },
+        {
+            "image": "Cars91.png",
+            "plate_text": "M028",
+            "yolo_confidence": 70.44,
+            "ocr_confidence": 1.71
+        },
+        {
+            "image": "Cars20.png",
+            "plate_text": "IO",
+            "yolo_confidence": 60.89,
+            "ocr_confidence": 2.06
+        },
+        {
+            "image": "Cars321.png",
+            "plate_text": "MO40",
+            "yolo_confidence": 80.35,
+            "ocr_confidence": 3.34
+        },
+        {
+            "image": "Cars15.png",
+            "plate_text": "IL2YO6",
+            "yolo_confidence": 76.03,
+            "ocr_confidence": 4.34
+        },
+        {
+            "image": "N22.jpeg",
+            "plate_text": "TPGRS",
+            "yolo_confidence": 74.25,
+            "ocr_confidence": 6.0
+        },
+        {
+            "image": "N120.jpeg",
+            "plate_text": "HRZ6D4S",
+            "yolo_confidence": 73.97,
+            "ocr_confidence": 6.21
+        },
+        {
+            "image": "Cars330.png",
+            "plate_text": "L5G800",
+            "yolo_confidence": 82.32,
+            "ocr_confidence": 6.38
+        },
+        {
+            "image": "Cars162.png",
+            "plate_text": "0XK3992",
+            "yolo_confidence": 71.09,
+            "ocr_confidence": 6.39
+        },
+        {
+            "image": "Cars405.png",
+            "plate_text": "0IC3687",
+            "yolo_confidence": 68.7,
+            "ocr_confidence": 6.46
+        },
+        {
+            "image": "Cars70.png",
+            "plate_text": "F41SG",
+            "yolo_confidence": 78.75,
+            "ocr_confidence": 7.72
+        },
+        {
+            "image": "Cars28.png",
+            "plate_text": "QDI",
+            "yolo_confidence": 68.64,
+            "ocr_confidence": 8.63
+        },
+        {
+            "image": "Cars311.png",
+            "plate_text": "N21418449",
+            "yolo_confidence": 74.97,
+            "ocr_confidence": 9.77
+        },
+        {
+            "image": "Cars268.png",
+            "plate_text": "UV3",
+            "yolo_confidence": 69.51,
+            "ocr_confidence": 9.82
+        },
+        {
+            "image": "N64.jpeg",
+            "plate_text": "I05972",
+            "yolo_confidence": 30.71,
+            "ocr_confidence": 10.06
+        },
+        {
+            "image": "Cars59.png",
+            "plate_text": "MHGEC",
+            "yolo_confidence": 70.84,
+            "ocr_confidence": 11.04
+        },
+        {
+            "image": "Cars278.png",
+            "plate_text": "I8863",
+            "yolo_confidence": 45.28,
+            "ocr_confidence": 11.12
+        },
+        {
+            "image": "Cars141.png",
+            "plate_text": "Z",
+            "yolo_confidence": 71.0,
+            "ocr_confidence": 11.22
+        },
+        {
+            "image": "Cars42.png",
+            "plate_text": "BYHAI136",
+            "yolo_confidence": 80.38,
+            "ocr_confidence": 11.5
+        },
+        {
+            "image": "Cars25.png",
+            "plate_text": "BYHAI136",
+            "yolo_confidence": 80.38,
+            "ocr_confidence": 11.5
+        },
+        {
+            "image": "Cars377.png",
+            "plate_text": "BYHAI136",
+            "yolo_confidence": 80.38,
+            "ocr_confidence": 11.5
+        },
+        {
+            "image": "Cars359.png",
+            "plate_text": "BERE",
+            "yolo_confidence": 78.31,
+            "ocr_confidence": 11.65
+        },
+        {
+            "image": "Cars290.png",
+            "plate_text": "04J",
+            "yolo_confidence": 71.46,
+            "ocr_confidence": 11.73
+        },
+        {
+            "image": "Cars127.png",
+            "plate_text": "S05",
+            "yolo_confidence": 49.99,
+            "ocr_confidence": 11.84
+        },
+        {
+            "image": "Cars270.png",
+            "plate_text": "120182991",
+            "yolo_confidence": 72.57,
+            "ocr_confidence": 12.3
+        },
+        {
+            "image": "Cars340.png",
+            "plate_text": "NXSJFUL",
+            "yolo_confidence": 72.27,
+            "ocr_confidence": 12.36
+        },
+        {
+            "image": "Cars143.png",
+            "plate_text": "IONZIOIT",
+            "yolo_confidence": 76.95,
+            "ocr_confidence": 12.59
+        },
+        {
+            "image": "Cars121.png",
+            "plate_text": "D9",
+            "yolo_confidence": 58.22,
+            "ocr_confidence": 12.65
+        },
+        {
+            "image": "Cars251.png",
+            "plate_text": "WT",
+            "yolo_confidence": 78.15,
+            "ocr_confidence": 13.44
+        },
+        {
+            "image": "N156.jpeg",
+            "plate_text": "WKZUTC830",
+            "yolo_confidence": 80.84,
+            "ocr_confidence": 14.13
+        },
+        {
+            "image": "Cars380.png",
+            "plate_text": "MBK",
+            "yolo_confidence": 63.67,
+            "ocr_confidence": 14.92
+        },
+        {
+            "image": "Cars21.png",
+            "plate_text": "1RO",
+            "yolo_confidence": 80.88,
+            "ocr_confidence": 14.94
+        },
+        {
+            "image": "Cars335.png",
+            "plate_text": "INOTACOPF",
+            "yolo_confidence": 87.49,
+            "ocr_confidence": 15.32
+        },
+        {
+            "image": "Cars205.png",
+            "plate_text": "INOTACOPF",
+            "yolo_confidence": 87.49,
+            "ocr_confidence": 15.32
+        },
+        {
+            "image": "Cars165.png",
+            "plate_text": "INZIAV1153",
+            "yolo_confidence": 71.84,
+            "ocr_confidence": 15.42
+        },
+        {
+            "image": "Cars103.png",
+            "plate_text": "WKIML",
+            "yolo_confidence": 66.88,
+            "ocr_confidence": 16.16
+        },
+        {
+            "image": "Cars157.png",
+            "plate_text": "PTB557K",
+            "yolo_confidence": 58.03,
+            "ocr_confidence": 16.55
+        },
+        {
+            "image": "N124.jpeg",
+            "plate_text": "KLEOK7361",
+            "yolo_confidence": 81.98,
+            "ocr_confidence": 16.67
+        },
+        {
+            "image": "Cars329.png",
+            "plate_text": "L6M",
+            "yolo_confidence": 82.33,
+            "ocr_confidence": 17.7
+        },
+        {
+            "image": "Cars194.png",
+            "plate_text": "MIE",
+            "yolo_confidence": 76.86,
+            "ocr_confidence": 18.16
+        },
+        {
+            "image": "Cars193.png",
+            "plate_text": "189VSM",
+            "yolo_confidence": 67.89,
+            "ocr_confidence": 19.16
+        },
+        {
+            "image": "Cars400.png",
+            "plate_text": "189VSM",
+            "yolo_confidence": 67.89,
+            "ocr_confidence": 19.16
+        },
+        {
+            "image": "Cars371.png",
+            "plate_text": "220",
+            "yolo_confidence": 76.19,
+            "ocr_confidence": 19.62
+        },
+        {
+            "image": "Cars350.png",
+            "plate_text": "F02",
+            "yolo_confidence": 70.78,
+            "ocr_confidence": 20.46
+        },
+        {
+            "image": "Cars237.png",
+            "plate_text": "651L7",
+            "yolo_confidence": 80.3,
+            "ocr_confidence": 20.54
+        },
+        {
+            "image": "Cars89.png",
+            "plate_text": "SM",
+            "yolo_confidence": 57.23,
+            "ocr_confidence": 20.82
+        },
+        {
+            "image": "Cars363.png",
+            "plate_text": "MAAAG",
+            "yolo_confidence": 86.86,
+            "ocr_confidence": 21.84
+        },
+        {
+            "image": "Cars224.png",
+            "plate_text": "284U717",
+            "yolo_confidence": 65.51,
+            "ocr_confidence": 22.05
+        },
+        {
+            "image": "Cars357.png",
+            "plate_text": "UOT",
+            "yolo_confidence": 71.71,
+            "ocr_confidence": 22.1
+        }
+    ],
+    "multi_plate_results": [
+        {
+            "image": "Cars106.png",
+            "plates_detected": 5,
+            "yolo_confidence": 75.71,
+            "plate_text": ""
+        },
+        {
+            "image": "Cars131.png",
+            "plates_detected": 5,
+            "yolo_confidence": 95.42,
+            "plate_text": "BP"
+        },
+        {
+            "image": "Cars114.png",
+            "plates_detected": 5,
+            "yolo_confidence": 95.42,
+            "plate_text": "BP"
+        },
+        {
+            "image": "Cars283.png",
+            "plates_detected": 4,
+            "yolo_confidence": 68.23,
+            "plate_text": "O4"
+        },
+        {
+            "image": "Cars352.png",
+            "plates_detected": 4,
+            "yolo_confidence": 75.52,
+            "plate_text": ""
+        },
+        {
+            "image": "Cars146.png",
+            "plates_detected": 4,
+            "yolo_confidence": 62.91,
+            "plate_text": ""
+        },
+        {
+            "image": "Cars362.png",
+            "plates_detected": 4,
+            "yolo_confidence": 53.22,
+            "plate_text": ""
+        },
+        {
+            "image": "N173.jpeg",
+            "plates_detected": 4,
+            "yolo_confidence": 88.12,
+            "plate_text": "583"
+        },
+        {
+            "image": "Cars124.png",
+            "plates_detected": 4,
+            "yolo_confidence": 73.9,
+            "plate_text": ""
+        },
+        {
+            "image": "N123.jpeg",
+            "plates_detected": 4,
+            "yolo_confidence": 96.05,
+            "plate_text": "ND"
+        },
+        {
+            "image": "Cars330.png",
+            "plates_detected": 4,
+            "yolo_confidence": 82.32,
+            "plate_text": "L5G800"
+        },
+        {
+            "image": "N235.jpeg",
+            "plates_detected": 4,
+            "yolo_confidence": 97.05,
+            "plate_text": "05"
+        },
+        {
+            "image": "Cars132.png",
+            "plates_detected": 3,
+            "yolo_confidence": 84.07,
+            "plate_text": ""
+        },
+        {
+            "image": "N219.jpeg",
+            "plates_detected": 3,
+            "yolo_confidence": 93.69,
+            "plate_text": "IH12DE1433"
+        },
+        {
+            "image": "Cars139.png",
+            "plates_detected": 3,
+            "yolo_confidence": 73.45,
+            "plate_text": ""
+        },
+        {
+            "image": "Cars211.png",
+            "plates_detected": 3,
+            "yolo_confidence": 96.96,
+            "plate_text": "F"
+        },
+        {
+            "image": "Cars89.png",
+            "plates_detected": 3,
+            "yolo_confidence": 57.23,
+            "plate_text": "SM"
+        },
+        {
+            "image": "N88.jpeg",
+            "plates_detected": 3,
+            "yolo_confidence": 80.12,
+            "plate_text": "CR"
+        },
+        {
+            "image": "Cars119.png",
+            "plates_detected": 3,
+            "yolo_confidence": 62.1,
+            "plate_text": ""
+        },
+        {
+            "image": "Cars5.png",
+            "plates_detected": 3,
+            "yolo_confidence": 34.08,
+            "plate_text": ""
+        },
+        {
+            "image": "Cars223.png",
+            "plates_detected": 3,
+            "yolo_confidence": 78.05,
+            "plate_text": "HA634"
+        },
+        {
+            "image": "Cars215.png",
+            "plates_detected": 3,
+            "yolo_confidence": 71.48,
+            "plate_text": "CH9984"
+        },
+        {
+            "image": "Cars174.png",
+            "plates_detected": 3,
+            "yolo_confidence": 65.24,
+            "plate_text": "AC"
+        },
+        {
+            "image": "Cars266.png",
+            "plates_detected": 3,
+            "yolo_confidence": 71.48,
+            "plate_text": "CH9984"
+        },
+        {
+            "image": "Cars143.png",
+            "plates_detected": 2,
+            "yolo_confidence": 76.95,
+            "plate_text": "IONZIOIT"
+        },
+        {
+            "image": "Cars103.png",
+            "plates_detected": 2,
+            "yolo_confidence": 66.88,
+            "plate_text": "WKIML"
+        },
+        {
+            "image": "Cars105.png",
+            "plates_detected": 2,
+            "yolo_confidence": 81.31,
+            "plate_text": "JP76546"
+        },
+        {
+            "image": "Cars338.png",
+            "plates_detected": 2,
+            "yolo_confidence": 46.57,
+            "plate_text": ""
+        },
+        {
+            "image": "Cars30.png",
+            "plates_detected": 2,
+            "yolo_confidence": 81.31,
+            "plate_text": "JP76546"
+        },
+        {
+            "image": "Cars295.png",
+            "plates_detected": 2,
+            "yolo_confidence": 78.5,
+            "plate_text": "8544"
+        },
+        {
+            "image": "Cars269.png",
+            "plates_detected": 2,
+            "yolo_confidence": 72.3,
+            "plate_text": "S"
+        },
+        {
+            "image": "Cars311.png",
+            "plates_detected": 2,
+            "yolo_confidence": 74.97,
+            "plate_text": "N21418449"
+        },
+        {
+            "image": "Cars207.png",
+            "plates_detected": 2,
+            "yolo_confidence": 80.83,
+            "plate_text": "K817GR"
+        },
+        {
+            "image": "Cars267.png",
+            "plates_detected": 2,
+            "yolo_confidence": 76.01,
+            "plate_text": "4677222"
+        },
+        {
+            "image": "Cars221.png",
+            "plates_detected": 2,
+            "yolo_confidence": 71.66,
+            "plate_text": ""
+        },
+        {
+            "image": "Cars214.png",
+            "plates_detected": 2,
+            "yolo_confidence": 43.92,
+            "plate_text": ""
+        },
+        {
+            "image": "Cars204.png",
+            "plates_detected": 2,
+            "yolo_confidence": 86.16,
+            "plate_text": "NBYOND"
+        },
+        {
+            "image": "Cars173.png",
+            "plates_detected": 2,
+            "yolo_confidence": 87.27,
+            "plate_text": "VIRGINIA"
+        },
+        {
+            "image": "Cars16.png",
+            "plates_detected": 2,
+            "yolo_confidence": 69.2,
+            "plate_text": ""
+        },
+        {
+            "image": "Cars85.png",
+            "plates_detected": 2,
+            "yolo_confidence": 76.55,
+            "plate_text": ""
+        },
+        {
+            "image": "Cars71.png",
+            "plates_detected": 2,
+            "yolo_confidence": 75.22,
+            "plate_text": ""
+        },
+        {
+            "image": "Cars47.png",
+            "plates_detected": 2,
+            "yolo_confidence": 81.26,
+            "plate_text": "139"
+        },
+        {
+            "image": "Cars426.png",
+            "plates_detected": 2,
+            "yolo_confidence": 85.12,
+            "plate_text": "CRAIG"
+        },
+        {
+            "image": "Cars403.png",
+            "plates_detected": 2,
+            "yolo_confidence": 74.01,
+            "plate_text": ""
+        },
+        {
+            "image": "Cars413.png",
+            "plates_detected": 2,
+            "yolo_confidence": 79.5,
+            "plate_text": "8544"
+        },
+        {
+            "image": "Cars390.png",
+            "plates_detected": 2,
+            "yolo_confidence": 81.26,
+            "plate_text": "139"
+        },
+        {
+            "image": "Cars358.png",
+            "plates_detected": 2,
+            "yolo_confidence": 82.04,
+            "plate_text": "P262FDX"
+        },
+        {
+            "image": "Cars316.png",
+            "plates_detected": 2,
+            "yolo_confidence": 77.24,
+            "plate_text": "2"
+        },
+        {
+            "image": "Cars347.png",
+            "plates_detected": 2,
+            "yolo_confidence": 67.32,
+            "plate_text": ""
+        },
+        {
+            "image": "Cars337.png",
+            "plates_detected": 2,
+            "yolo_confidence": 47.07,
+            "plate_text": ""
+        }
+    ]
+}
