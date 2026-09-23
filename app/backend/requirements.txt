@@ -5,3 +5,11 @@ opencv-python>=4.9
 numpy>=1.26
 ultralytics>=8.2
 easyocr>=1.7
+
+# CPU-only PyTorch builds. The default PyPI wheels bundle CUDA libraries
+# (~2 GB extra, and CUDA init probes memory on import). The +cpu wheels
+# come from PyTorch's CPU index and cut the installed footprint roughly
+# in half — required to fit Render's free-tier RAM.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0+cpu
+torchvision==0.28.0+cpu

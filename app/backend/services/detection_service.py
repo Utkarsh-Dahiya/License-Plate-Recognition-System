@@ -28,9 +28,11 @@ stage for real-world plate crops.
 
 from __future__ import annotations
 
+import gc
 import logging
 import os
 import re
+import threading
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -110,10 +112,91 @@ class _TimingBucket:
 # ============================================================
 # LAZY SINGLETON MODEL STATE
 # ============================================================
+#
+# Free-tier deployment notes (Render free tier has very little RAM):
+#   - OMP/MKL/OPENBLAS thread counts are capped via env vars BEFORE
+#     torch is imported: every spare intra-op thread reserves its own
+#     stack and memory arena.
+#   - A load lock guarantees exactly one YOLO instance and exactly one
+#     EasyOCR reader, no matter how many requests arrive concurrently
+#     while models are still loading.
+#   - torch.inference_mode() around YOLO avoids building autograd state.
+#   - A one-time tiny warmup predict triggers all lazy allocations
+#     (model graph, workspaces) at load time instead of inside the
+#     first user request, and gc.collect() trims the transient peak.
 
 _yolo_model = None
 _ocr_reader = None
 _load_error: str | None = None
+_load_lock = threading.Lock()
+
+for _var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+    os.environ.setdefault(_var, "1")
+
+
+def _apply_low_memory_runtime_caps():
+    """Cap runtime thread pools.
+
+    Env vars alone do not cover torch's own pool management: each intra-op
+    / inter-op thread reserves a private memory arena, which on a big or
+    shared CPU multiplies baseline RSS by the core count. For 1-plate-at-a-
+    time CPU inference a single thread is the lowest-memory configuration.
+    cv2 likewise keeps a parallel-for pool that small crop ops never need.
+    """
+
+    try:
+        import torch
+
+        torch.set_num_threads(1)
+    except Exception:
+        pass
+
+    # Must run before any parallel work starts; harmless if it cannot.
+    try:
+        import torch
+
+        torch.set_num_interop_threads(1)
+    except Exception:
+        pass
+
+    try:
+        cv2.setNumThreads(0)
+    except Exception:
+        pass
+
+
+_low_memory_caps_applied = False
+
+
+def _ensure_low_memory_runtime():
+    global _low_memory_caps_applied
+
+    if _low_memory_caps_applied:
+        return
+
+    _apply_low_memory_runtime_caps()
+
+    _low_memory_caps_applied = True
+
+
+def _release_memory_to_os():
+    """glibc malloc_trim: hand freed heap back to the OS.
+
+    CPython frees objects but glibc often keeps the pages resident, and
+    container memory limits are enforced on RSS. No-op on non-glibc
+    platforms (Render is Debian/Ubuntu Linux; Windows dev is unaffected).
+    """
+
+    if os.name != "posix":
+        return
+
+    try:
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+
+    except Exception:
+        pass
 
 
 def _ensure_models_loaded():
@@ -122,29 +205,53 @@ def _ensure_models_loaded():
     if _yolo_model is not None and _ocr_reader is not None:
         return
 
-    if _load_error is not None:
-        raise RuntimeError(_load_error)
+    with _load_lock:
+        # Re-check: another thread may have finished loading while we waited.
+        if _yolo_model is not None and _ocr_reader is not None:
+            return
 
-    try:
-        from ultralytics import YOLO
-        import easyocr
+        if _load_error is not None:
+            raise RuntimeError(_load_error)
 
-        if not MODEL_WEIGHTS_PATH.exists():
-            raise FileNotFoundError(
-                f"YOLO weights not found at {MODEL_WEIGHTS_PATH}. "
-                "Point LVA_MODEL_PATH at your best.pt."
+        # Cap thread pools before torch's pools are created.
+        _ensure_low_memory_runtime()
+
+        try:
+            import easyocr
+            import torch
+            from ultralytics import YOLO
+
+            if not MODEL_WEIGHTS_PATH.exists():
+                raise FileNotFoundError(
+                    f"YOLO weights not found at {MODEL_WEIGHTS_PATH}. "
+                    "Point LVA_MODEL_PATH at your best.pt."
+                )
+
+            _yolo_model = YOLO(str(MODEL_WEIGHTS_PATH))
+
+            # One-time warmup: initializes every lazy allocation now,
+            # not during the first real user request.
+            with torch.inference_mode():
+                _yolo_model.predict(
+                    source=np.zeros((320, 320, 3), dtype=np.uint8),
+                    imgsz=640,
+                    conf=0.25,
+                    verbose=False,
+                )
+
+            _ocr_reader = easyocr.Reader(
+                ["en"],
+                gpu=False,
+                detector=False,
+                verbose=False,
             )
 
-        _yolo_model = YOLO(str(MODEL_WEIGHTS_PATH))
+            gc.collect()
+            _release_memory_to_os()
 
-        _ocr_reader = easyocr.Reader(
-            ["en"],
-            gpu=False,
-        )
-
-    except Exception as exc:
-        _load_error = str(exc)
-        raise RuntimeError(_load_error) from exc
+        except Exception as exc:
+            _load_error = str(exc)
+            raise RuntimeError(_load_error) from exc
 
 
 def models_ready() -> bool:
@@ -258,6 +365,12 @@ def status_from_confidence(
 # OCR PREPROCESSING
 # ============================================================
 
+# Cap full-image inference resolution. The offline video pipeline
+# already processed at 1280px wide; huge camera/phone uploads would
+# otherwise multiply YOLO and annotation memory several-fold for no
+# accuracy gain.
+_MAX_INFER_SIDE = 1280
+
 # Keep the bounded OCR canvas.
 #
 # The old implementation used a distorted 1800x600 canvas.
@@ -302,6 +415,10 @@ _MIN_CONSENSUS_VOTES = 2
 def _pad_and_scale(crop: np.ndarray) -> np.ndarray:
     """
     Add small replicate padding and resize while preserving aspect ratio.
+
+    Kept for the offline scripts that import it; the live API path uses
+    _prepare_ocr_canvas() below (replicate borders leak edge pixels into
+    the recognizer's sequence when no text-detection stage filters them).
     """
 
     h, w = crop.shape[:2]
@@ -361,6 +478,43 @@ def _pad_and_scale(crop: np.ndarray) -> np.ndarray:
 
     return cv2.resize(
         padded,
+        (target_w, target_h),
+        interpolation=interp,
+    )
+
+
+def _prepare_ocr_canvas(crop: np.ndarray) -> np.ndarray:
+    """
+    Aspect-preserving resize of a YOLO plate crop for the recognizer.
+
+    Unlike _pad_and_scale, no replicate border is added: the recognizer
+    reads the whole crop as one text line, and replicated edge pixels
+    produce phantom leading/trailing characters.
+    """
+
+    h, w = crop.shape[:2]
+
+    longer_side = max(h, w)
+
+    if longer_side < _OCR_MAX_DIM:
+        scale = min(
+            _OCR_MAX_DIM / longer_side,
+            _OCR_MAX_UPSCALE,
+        )
+    else:
+        scale = _OCR_MAX_DIM / longer_side
+
+    target_w = max(1, int(w * scale))
+    target_h = max(1, int(h * scale))
+
+    interp = (
+        cv2.INTER_CUBIC
+        if scale >= 1
+        else cv2.INTER_AREA
+    )
+
+    return cv2.resize(
+        crop,
         (target_w, target_h),
         interpolation=interp,
     )
@@ -462,22 +616,29 @@ def _run_ocr(
     image: np.ndarray,
 ) -> list[tuple[str, float]]:
     """
-    Run exactly one EasyOCR readtext() pass.
+    Run exactly one EasyOCR recognizer pass on a plate crop.
 
     IMPORTANT:
-    We intentionally use readtext() rather than recognize().
+    The reader is built with detector=False (see _ensure_models_loaded).
+    YOLO has already isolated the plate, so CRAFT re-detection would only
+    duplicate work and cost ~500 MB of RAM — which the free tier does not
+    have. recognize() reads the crop as one text line and returns the
+    same (text, confidence) evidence the cascade expects.
     """
 
     try:
-        results = _ocr_reader.readtext(
-            image,
-            detail=1,
-            paragraph=False,
-            allowlist=(
-                "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                "0123456789"
-            ),
-        )
+        import torch
+
+        with torch.inference_mode():
+            results = _ocr_reader.recognize(
+                image,
+                detail=1,
+                paragraph=False,
+                allowlist=(
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                    "0123456789"
+                ),
+            )
 
     except Exception:
         return []
@@ -738,19 +899,42 @@ def run_detection_on_image(
             "Is it a valid image file?"
         )
 
+    # Downscale oversized uploads before YOLO (schema/coordinates are
+    # reported in the processed image's pixel space, exactly like the
+    # video pipeline).
     h, w = image.shape[:2]
+
+    longest = max(h, w)
+
+    if longest > _MAX_INFER_SIDE:
+        scale = _MAX_INFER_SIDE / longest
+
+        image = cv2.resize(
+            image,
+            (
+                max(1, int(w * scale)),
+                max(1, int(h * scale)),
+            ),
+            interpolation=cv2.INTER_AREA,
+        )
+
+        h, w = image.shape[:2]
 
     # --------------------------------------------------------
     # YOLO detection
     # --------------------------------------------------------
 
+    import torch
+
     t0 = time.perf_counter()
 
-    results = _yolo_model.predict(
-        source=image,
-        conf=conf_threshold,
-        verbose=False,
-    )
+    with torch.inference_mode():
+        results = _yolo_model.predict(
+            source=image,
+            imgsz=640,
+            conf=conf_threshold,
+            verbose=False,
+        )
 
     timing.add(
         "YOLO",
@@ -783,6 +967,11 @@ def run_detection_on_image(
                     y2,
                 )
             )
+
+    # Ultralytics Results retain the full-resolution frame and overlay
+    # tensors; everything needed (conf + xyxy) is already extracted.
+    del results
+    del result
 
     # Highest confidence first.
     detections.sort(
@@ -876,7 +1065,7 @@ def run_detection_on_image(
 
             t0 = time.perf_counter()
 
-            base = _pad_and_scale(
+            base = _prepare_ocr_canvas(
                 crop
             )
 
@@ -1205,6 +1394,7 @@ def run_detection_on_image(
     ok, buf = cv2.imencode(
         ".jpg",
         annotated,
+        [cv2.IMWRITE_JPEG_QUALITY, 85],
     )
 
     annotated_b64 = None
@@ -1229,6 +1419,12 @@ def run_detection_on_image(
         plate_count=len(plates),
         ocr_pass_count=ocr_pass_count,
     )
+
+    # Per-request transient allocations (decoded image, annotated copy,
+    # crops, OCR tensors) are garbage by now; hand the heap back so the
+    # container's resident set stays close to the model footprint.
+    gc.collect()
+    _release_memory_to_os()
 
     # ========================================================
     # API RESPONSE

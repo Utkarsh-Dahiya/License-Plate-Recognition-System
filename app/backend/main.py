@@ -75,6 +75,10 @@ app = FastAPI(
 #
 #   LVA_FRONTEND_ORIGIN=https://example.com,https://www.example.com
 #
+# A trailing slash on any origin is ignored (browsers always send
+# scheme://host with no trailing slash, so "https://foo.com/" would
+# otherwise silently fail CORSMiddleware's exact-origin match).
+#
 # ============================================================
 
 DEFAULT_FRONTEND_ORIGINS = (
@@ -83,7 +87,7 @@ DEFAULT_FRONTEND_ORIGINS = (
 )
 
 FRONTEND_ORIGINS = [
-    origin.strip()
+    origin.strip().rstrip("/")
     for origin in os.environ.get(
         "LVA_FRONTEND_ORIGIN",
         DEFAULT_FRONTEND_ORIGINS,
