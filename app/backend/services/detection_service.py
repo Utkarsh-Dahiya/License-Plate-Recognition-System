@@ -19,11 +19,13 @@ The interactive OCR path uses an adaptive cascade:
 The important optimization is to avoid running all three OCR passes
 when the first result is already sufficiently supported.
 
-IMPORTANT:
-    EasyOCR .recognize() is intentionally NOT used.
-
-Every OCR pass goes through readtext(), preserving EasyOCR's detection
-stage for real-world plate crops.
+IMPORTANT (multi-line plates):
+    Motorcycle plates stack state code ("37-N1") over the serial
+    ("4635"). Feeding that crop to the recognizer as one horizontal
+    line produces garbage or nothing. The cascade below adds a final,
+    memory-safe tier that splits such crops into horizontal text bands
+    with OpenCV projection profiles and recognizes each band with the
+    SAME recognizer-only reader — no CRAFT, no extra models.
 """
 
 from __future__ import annotations
@@ -579,6 +581,501 @@ def _variant_tertiary(
 
 
 # ============================================================
+# MULTI-LINE (TWO-BAND) PLATE SUPPORT
+# ============================================================
+#
+# Indian motorcycle plates stack the state code over the serial
+# ("37-N1" / "4635"). The recognizer-only path reads a crop as ONE
+# horizontal line, so a two-band crop must be split and each band
+# recognized separately.
+#
+# Memory safety: the splitter is pure OpenCV geometry — grayscale,
+# Sobel row-energy, and a projection-profile valley scan over the
+# SAME already-allocated crop. No extra model, no torch tensors,
+# no CRAFT. Peak added memory is a few grayscale copies of a crop
+# that is already capped at _OCR_MAX_DIM.
+
+# A single-line Indian plate is very wide (aspect ~0.18-0.35). A two-line
+# motorcycle plate is stacked, so it is noticeably taller — but still wider
+# than tall (measured ~0.6-0.9 on real plates). Anything below this ratio
+# is never split; anything at or above it is a split candidate.
+_MAX_SPLIT_ASPECT = 0.45
+
+# A viable horizontal gap between two text bands.
+_MIN_SPLIT_VALLEY_DEPTH = 0.55
+
+# Reject slivers: each band needs enough rows for the recognizer.
+_MIN_BAND_ROWS = 12
+
+# Ignore near-empty energy margins (borders / holder shadows).
+_MARGIN_FRACTION = 0.10
+
+
+def _row_energy(gray: np.ndarray) -> np.ndarray:
+    """Per-row text energy: horizontal Sobel magnitude, clamped [0, 1].
+
+    d/dy responds to every horizontal character stroke regardless of
+    polarity (dark-on-light or light-on-dark), so it survives uneven
+    lighting without any binarization threshold.
+    """
+
+    sobel_y = cv2.Sobel(
+        gray,
+        cv2.CV_32F,
+        0,
+        1,
+        ksize=3,
+    )
+
+    np.abs(sobel_y, out=sobel_y)
+
+    energy = sobel_y.sum(axis=1)
+
+    max_energy = float(energy.max())
+
+    if max_energy <= 1e-6:
+        return energy
+
+    return energy / max_energy
+
+
+def _split_two_line_bands(
+    enhanced_gray: np.ndarray,
+) -> list[tuple[int, int]] | None:
+    """Find the horizontal gap between the two text bands of a plate crop.
+
+    Returns [(y0, y1), (y0, y1)] row ranges (top band, bottom band), or
+    None when the crop does not look like two stacked text lines.
+    """
+
+    h, w = enhanced_gray.shape[:2]
+
+    if h < 2 * _MIN_BAND_ROWS + 2 or w < 16:
+        return None
+
+    # Skip low-information borders (dark frames, holder edges).
+    margin_y = max(1, int(h * _MARGIN_FRACTION))
+
+    energy = _row_energy(enhanced_gray)
+
+    y_lo = margin_y
+    y_hi = h - margin_y
+
+    if y_hi - y_lo < 2 * _MIN_BAND_ROWS + 2:
+        y_lo = 0
+        y_hi = h
+
+    span = energy[y_lo:y_hi]
+
+    if span.size == 0 or float(span.max()) <= 1e-6:
+        return None
+
+    # Longest run of low-energy rows = the gap between the bands.
+    threshold = _MIN_SPLIT_VALLEY_DEPTH * float(span.max())
+
+    best_start = -1
+    best_len = 0
+    cur_start = -1
+    cur_len = 0
+
+    for i, value in enumerate(span):
+        if value <= threshold:
+            if cur_start < 0:
+                cur_start = i
+            cur_len += 1
+            if cur_len > best_len:
+                best_len = cur_len
+                best_start = cur_start
+        else:
+            cur_start = -1
+            cur_len = 0
+
+    if best_start < 0:
+        return None
+
+    gap_top = y_lo + best_start
+    gap_bottom = gap_top + best_len
+
+    # Tighten to the ink-free core of the valley.
+    while (
+        gap_top > y_lo
+        and energy[gap_top - 1] <= threshold
+    ):
+        gap_top -= 1
+
+    while (
+        gap_bottom < y_hi
+        and energy[gap_bottom] <= threshold
+    ):
+        gap_bottom += 1
+
+    top_rows = gap_top - y_lo
+    bottom_rows = y_hi - gap_bottom
+
+    if top_rows < _MIN_BAND_ROWS or bottom_rows < _MIN_BAND_ROWS:
+        return None
+
+    # Both halves must actually contain text energy.
+    if (
+        float(energy[y_lo:gap_top].max()) < 0.20
+        or float(energy[gap_bottom:y_hi].max()) < 0.20
+    ):
+        return None
+
+    # Split at the valley MIDPOINT: every ink row (including glyph tops
+    # that dip into the shallow end of the valley) is assigned to its
+    # nearest band. _tight_text_region() then trims each band to its
+    # actual text rows/columns.
+    mid = (gap_top + gap_bottom) // 2
+
+    return [
+        (y_lo, mid),
+        (mid, y_hi),
+    ]
+
+
+def _longest_energy_run(
+    energy: np.ndarray,
+    threshold: float,
+    bridge: int = 0,
+) -> tuple[int, int] | None:
+    """Widest contiguous above-threshold run of rows/columns.
+
+    `bridge` merges runs separated by gaps up to that many cells
+    (e.g. the space in "MH 20"), while frame strokes sitting far from
+    the text stay isolated and are dropped.
+    """
+
+    above = energy > threshold
+
+    runs: list[tuple[int, int]] = []
+    start = None
+
+    for i, flag in enumerate(above):
+        if flag and start is None:
+            start = i
+        elif not flag and start is not None:
+            runs.append((start, i))
+            start = None
+
+    if start is not None:
+        runs.append((start, len(above)))
+
+    if not runs:
+        return None
+
+    if bridge > 0:
+        merged: list[tuple[int, int]] = [runs[0]]
+
+        for s, e in runs[1:]:
+            if s - merged[-1][1] <= bridge:
+                merged[-1] = (merged[-1][0], e)
+            else:
+                merged.append((s, e))
+
+        runs = merged
+
+    best = max(
+        runs,
+        key=lambda r: r[1] - r[0],
+    )
+
+    return best
+
+
+def _max_run_per_column(
+    binary_img: np.ndarray,
+) -> np.ndarray:
+    """Length of the longest vertical True-run for every column."""
+
+    best = np.zeros(
+        binary_img.shape[1],
+        dtype=np.int32,
+    )
+
+    current = np.zeros_like(best)
+
+    for row in binary_img:
+
+        current = np.where(
+            row,
+            current + 1,
+            0,
+        )
+
+        np.maximum(
+            best,
+            current,
+            out=best,
+        )
+
+    return best
+
+
+def _zero_frame_lines(
+    ink: np.ndarray,
+) -> None:
+    """Zero out the plate's border-frame lines from the ink image (in place).
+
+    Frame lines are STRUCTURALLY different from text: a thin, essentially
+    full-span stroke (the plate rim). Per-column longest vertical ink-run
+    flags them (glyph strokes never span the full band height), and only
+    columns near the band's left/right edges are eligible — the frame is
+    always at the rim, never in the middle.
+    """
+
+    h, w = ink.shape[:2]
+
+    ink_max = float(ink.max())
+
+    if ink_max <= 1e-6:
+        return
+
+    binary = ink > max(
+        12.0,
+        ink_max * 0.15,
+    )
+
+    edge_zone = max(2, int(w * 0.15))
+
+    # Vertical frame lines -> per-column full-height runs.
+    col_runs = _max_run_per_column(binary)
+
+    frame_cols = col_runs > (h * 0.70)
+
+    frame_cols[edge_zone : w - edge_zone] = False
+
+    if frame_cols.any():
+
+        # Text never sits OUTSIDE the border frame, so blank everything
+        # from the band edge up to the innermost detected frame line on
+        # each side. This also removes high-pass edge artifacts on the
+        # dark plate surround (blur padding resurrects ink there).
+        left_zone = frame_cols[:edge_zone]
+
+        if left_zone.any():
+            ink[:, : int(np.max(np.nonzero(left_zone)[0])) + 1] = 0
+
+        right_zone = frame_cols[w - edge_zone :]
+
+        if right_zone.any():
+            ink[
+                :,
+                w - edge_zone + int(np.min(np.nonzero(right_zone)[0])) :,
+            ] = 0
+
+    # Horizontal frame lines -> per-row full-width runs.
+    row_runs = _max_run_per_column(binary.T)
+
+    frame_rows = row_runs > (w * 0.70)
+
+    row_zone = max(2, int(h * 0.15))
+
+    frame_rows[row_zone : h - row_zone] = False
+
+    if frame_rows.any():
+
+        top_zone = frame_rows[:row_zone]
+
+        if top_zone.any():
+            ink[: int(np.max(np.nonzero(top_zone)[0])) + 1, :] = 0
+
+        bottom_zone = frame_rows[h - row_zone :]
+
+        if bottom_zone.any():
+            ink[
+                h - row_zone + int(np.min(np.nonzero(bottom_zone)[0])) :,
+                :,
+            ] = 0
+
+
+def _tight_text_region(
+    band: np.ndarray,
+) -> np.ndarray:
+    """Trim a band slice to its actual text rows and columns.
+
+    Uses a high-pass residual (band minus large-kernel blur) so smooth
+    shading (uneven lighting, reflections) contributes no energy and
+    only glyph strokes do. _zero_frame_lines() removes the plate rim's
+    full-span strokes first (they would otherwise dominate the energy
+    profile and read as phantom I/L/1 characters). Independent 25%
+    guards per dimension keep a pathological trim from collapsing the
+    band.
+    """
+
+    h, w = band.shape[:2]
+
+    if h < 6 or w < 10:
+        return band
+
+    # High-pass: glyph strokes survive, smooth gradients/shadows vanish.
+    ksize = max(3, (min(h, w) // 6) * 2 + 1)
+
+    background = cv2.GaussianBlur(
+        band,
+        (ksize, ksize),
+        0,
+    )
+
+    ink = cv2.absdiff(band, background)
+
+    _zero_frame_lines(ink)
+
+    rows = ink.sum(
+        axis=1,
+        dtype=np.float64,
+    )
+
+    cols = ink.sum(
+        axis=0,
+        dtype=np.float64,
+    )
+
+    max_row = float(rows.max())
+
+    if max_row > 1e-6:
+        rows = rows / max_row
+
+    max_col = float(cols.max())
+
+    if max_col > 1e-6:
+        cols = cols / max_col
+
+    y0, y1 = 0, h
+    x0, x1 = 0, w
+
+    row_run = _longest_energy_run(rows, 0.25)
+
+    if row_run and (row_run[1] - row_run[0]) >= h * 0.25:
+        y0, y1 = row_run
+
+    col_run = _longest_energy_run(
+        cols,
+        0.25,
+        bridge=max(2, int(w * 0.08)),
+    )
+
+    if (
+        col_run
+        and (col_run[1] - col_run[0]) >= w * 0.25
+    ):
+        x0, x1 = col_run
+
+    return band[y0:y1, x0:x1]
+
+
+# Below this a band read is noise, not evidence; using it would only
+# inject junk into the combined candidate.
+_MIN_BAND_CONF = 0.10
+
+
+def _recognize_bands(
+    enhanced_gray: np.ndarray,
+    plain_gray: np.ndarray | None,
+    bands: list[tuple[int, int]],
+) -> list[tuple[str, float]]:
+    """Recognize each horizontal band separately, then JOIN the reads.
+
+    Band texts are short ("37N1", "4635"), far below the >=6-character
+    filter the evidence selector applies — so the combined top-to-bottom
+    string is the candidate that matters:
+
+        "37-N1" over "4635"  ->  combined "37N14635"
+
+    Each band is tried on at most two lightweight variants — the CLAHE
+    enhancement shared with the whole-crop tiers, and the plain grayscale
+    (CLAHE amplifies sensor noise on clean/flat plates, which corrupts
+    band reads) — and the higher-confidence read wins. One recognizer
+    pass per variant, small crops only. Returns [] when fewer than two
+    bands produced text (a split of a true single-line plate).
+    """
+
+    band_reads: list[tuple[str, float]] = []
+
+    for y0, y1 in bands:
+
+        best_read: tuple[str, float] | None = None
+
+        for source in (enhanced_gray, plain_gray):
+
+            if source is None:
+                continue
+
+            band = source[
+                max(0, y0):max(0, y1),
+                :,
+            ]
+
+            if band.size == 0:
+                continue
+
+            # Trim to the actual text rows/columns: removes the plate's
+            # border-frame strokes and empty margins that otherwise
+            # become phantom characters.
+            band = _tight_text_region(band)
+
+            if band.size == 0:
+                continue
+
+            # Mild padding keeps ascenders/descenders off the border.
+            pad = max(4, band.shape[0] // 5)
+
+            # Padding must blend with the plate background INSIDE the
+            # band. A constant frame darker than the local background is
+            # read by the recognizer as phantom edge characters, so take
+            # the dominant (majority) luminance of the trimmed band:
+            # bright for white plates, dark for black ones.
+            border_value = int(np.percentile(band, 70))
+
+            band = cv2.copyMakeBorder(
+                band,
+                pad,
+                pad,
+                pad,
+                pad,
+                cv2.BORDER_CONSTANT,
+                value=border_value,
+            )
+
+            band_candidates = _run_ocr(band)
+
+            if band_candidates:
+
+                candidate = max(
+                    band_candidates,
+                    key=lambda item: item[1],
+                )
+
+                if (
+                    best_read is None
+                    or candidate[1] > best_read[1]
+                ):
+                    best_read = candidate
+
+        if (
+            best_read is not None
+            and best_read[1] >= _MIN_BAND_CONF
+        ):
+            band_reads.append(best_read)
+
+    if len(band_reads) < 2:
+        return []
+
+    combined = "".join(
+        text for text, _ in band_reads
+    )
+
+    if not combined:
+        return []
+
+    combined_conf = min(
+        conf for _, conf in band_reads
+    )
+
+    return [(combined, combined_conf)]
+
+
+# ============================================================
 # OCR SCORING
 # ============================================================
 
@@ -624,6 +1121,14 @@ def _run_ocr(
     duplicate work and cost ~500 MB of RAM — which the free tier does not
     have. recognize() reads the crop as one text line and returns the
     same (text, confidence) evidence the cascade expects.
+
+    Evidence contract (multi-line support):
+    recognize() on a multi-band image returns one entry per segment.
+    Single-segment results are returned exactly as before. Multi-segment
+    results are ALSO joined per pass (top-to-bottom, LTR) as extra
+    candidates so two-line plates compete fairly with single-line ones.
+    A single-segment pass therefore can never lose its previous winner —
+    it can only gain candidates.
     """
 
     try:
@@ -634,27 +1139,73 @@ def _run_ocr(
                 image,
                 detail=1,
                 paragraph=False,
+                # "-" is allowed so the separator stamped on many Indian
+                # plates ("37-N1") maps to a hyphen glyph instead of
+                # being forced onto the nearest alphanumeric (usually a
+                # phantom J/I). clean_text() strips it afterwards.
                 allowlist=(
                     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                    "0123456789"
+                    "0123456789-"
                 ),
             )
 
     except Exception:
         return []
 
-    candidates = []
+    segments: list[
+        tuple[float, float, str, float]
+    ] = []
+    # (y_center, x_center, cleaned_text, confidence)
 
-    for _, text, conf in results:
+    for box, text, conf in results:
 
         cleaned = clean_text(text)
 
-        if cleaned:
+        if not cleaned:
+            continue
+
+        if box and len(box) > 0:
+            ys = [float(p[1]) for p in box]
+            xs = [float(p[0]) for p in box]
+            y_center = sum(ys) / len(ys)
+            x_center = sum(xs) / len(xs)
+        else:
+            y_center = 0.0
+            x_center = 0.0
+
+        segments.append(
+            (y_center, x_center, cleaned, float(conf))
+        )
+
+    if not segments:
+        return []
+
+    candidates = [
+        (text, conf)
+        for _, _, text, conf in segments
+    ]
+
+    if len(segments) > 1:
+        # Whole-crop reading, top-to-bottom then left-to-right.
+        ordered = sorted(
+            segments,
+            key=lambda s: (
+                s[0],
+                s[1],
+            ),
+        )
+
+        joined = "".join(
+            text for _, _, text, _ in ordered
+        )
+
+        joined_conf = min(
+            conf for _, _, _, conf in ordered
+        )
+
+        if joined:
             candidates.append(
-                (
-                    cleaned,
-                    float(conf),
-                )
+                (joined, joined_conf)
             )
 
     return candidates
@@ -1236,6 +1787,89 @@ def run_detection_on_image(
                         "Scoring",
                         time.perf_counter() - t0,
                     )
+
+            # =================================================
+            # TIER 4 — MULTI-LINE SPLIT (two-band plates)
+            # =================================================
+
+            # Only for crops that can physically hold two stacked lines
+            # (near-square or taller) and only when the whole-crop tiers
+            # did not already produce a well-supported single-line read.
+            # Typical trigger: motorcycle plates, whose two-line layout
+            # makes the whole-crop read garbage or near-empty.
+            crop_aspect = (
+                float(base_gray.shape[0])
+                / max(float(base_gray.shape[1]), 1.0)
+            )
+
+            whole_crop_weak = (
+                best is None
+                or not _is_strong_enough(best)
+            )
+
+            if (
+                crop_aspect >= _MAX_SPLIT_ASPECT
+                and whole_crop_weak
+            ):
+
+                t0 = time.perf_counter()
+
+                bands = _split_two_line_bands(
+                    enhanced
+                )
+
+                timing.add(
+                    "Preprocess",
+                    time.perf_counter() - t0,
+                    note=f"plate{idx} multiline-split",
+                )
+
+                if bands:
+
+                    t0 = time.perf_counter()
+
+                    band_candidates = _recognize_bands(
+                        enhanced,
+                        base_gray,
+                        bands,
+                    )
+
+                    ocr_pass_count += len(bands)
+
+                    timing.add(
+                        "OCR",
+                        time.perf_counter() - t0,
+                        note=(
+                            f"plate{idx} tier4(bands="
+                            f"{len(bands)})"
+                        ),
+                    )
+
+                    _log_ocr_candidates(
+                        idx,
+                        "tier4(multiline)",
+                        band_candidates,
+                    )
+
+                    if band_candidates:
+
+                        tier_evidence.append(
+                            (
+                                4,
+                                band_candidates,
+                            )
+                        )
+
+                        t0 = time.perf_counter()
+
+                        best = _evidence_select(
+                            tier_evidence
+                        )
+
+                        timing.add(
+                            "Scoring",
+                            time.perf_counter() - t0,
+                        )
 
             # Final evidence-based selection.
             if tier_evidence:
