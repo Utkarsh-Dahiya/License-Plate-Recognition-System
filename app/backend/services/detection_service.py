@@ -19,6 +19,31 @@ The interactive OCR path uses an adaptive cascade:
 The important optimization is to avoid running all three OCR passes
 when the first result is already sufficiently supported.
 
+ACCURACY LAYER (format-aware candidate selection):
+
+    1. The whole-crop OCR canvas is first tightened to the plate's
+       actual text rows/columns (high-pass ink profile, plate-rim
+       frame lines zeroed). Previously this trimming ran only in the
+       multi-line tier, so single-line crops carried frame strokes
+       and dark margins into the recognizer — the source of phantom
+       LEADING characters (KL01AP8921 -> LKL0AP8921).
+    2. EasyOCR reports only the MEAN of its per-step CTC max
+       probabilities. A tiny read-only patch (see
+       _install_char_conf_hook) additionally captures the per-step
+       probabilities so the leading/trailing characters of every
+       candidate can be scored on their own evidence.
+    3. Candidates are validated against the REAL Indian registration
+       formats (current 2005+ series AND legacy series, with actual
+       state codes and district numbers 01-38). A candidate like
+       KKL91APB924 (double state letter, 9-char serial) no longer
+       scores a perfect format 100.
+    4. Selection penalizes candidates whose first/last characters
+       have low CTC confidence — the classic hallucinated-edge
+       signature — and rewards strict-format matches. The correct
+       KL01AP8921 beats LKL0AP8921 because its edge characters are
+       actually supported by the recognizer; nothing is deleted
+       blindly, weakly-evidenced candidates simply lose.
+
 IMPORTANT (multi-line plates):
     Motorcycle plates stack state code ("37-N1") over the serial
     ("4635"). Feeding that crop to the recognizer as one horizontal
@@ -336,6 +361,648 @@ def indian_plate_score(text: str) -> int:
     return min(score, 100)
 
 
+# ------------------------------------------------------------
+# STRICT Indian plate validation (real registration formats).
+#
+# The legacy scorer above accepts near-miss junk like KKL91APB924
+# (double leading letter, 5-char serial) at full marks. The strict
+# layer below knows the actual issuance rules:
+#
+#   current series (2005+):
+#       STATE(2, real code) + district(01-38) + series(0-3 letters)
+#       + number(1-4 digits)          e.g. KL01AP8921, MH12DE1433
+#   legacy series (pre-2005):
+#       STATE(2, real code) + letters(1-2) + number(1-4 digits)
+#                                       e.g. MHA4321, KLB1055
+# ------------------------------------------------------------
+
+INDIAN_STATE_CODES = frozenset({
+    "AN", "AP", "AR", "AS", "BR", "CG", "CH", "DD", "DL", "DN",
+    "GA", "GJ", "HR", "HP", "JH", "JK", "KA", "KL", "LD", "MH",
+    "ML", "MN", "MP", "MZ", "NL", "OD", "PB", "PY", "RJ", "SK",
+    "TN", "TR", "TS", "TG", "UA", "UK", "UP", "WB",
+})
+
+# District numbers actually seen in the wild top out in the high 30s
+# (Delhi renumbered up to ~38); anything beyond is a misread.
+# District/RTO numbers are always TWO digits on current plates
+# (01-99, leading zero required; big states go well past 30: MH-48,
+# KA-51, UP-78). A dropped leading zero (KL9AP8921 for KL09...) fails
+# here. Exception: Delhi, whose heritage single-digit RTOs (DL 8 Car,
+# DL 9 New Delhi) and letter-suffixed codes (DL 3C, DL 4C, DL 1S)
+# are still on legions of registered vehicles.
+_RTO_GROUP = r"(?:0[1-9]|[1-9][0-9])"
+_RTO_GROUP_DL = r"(?:0[1-9]|[1-9][0-9]|[1-9][A-Z]|[1-9])"
+
+_RE_CURRENT_PLATE = re.compile(
+    r"^(?:DL" + _RTO_GROUP_DL + r"|[A-Z]{2}" + _RTO_GROUP + r")"
+    r"[A-Z]{0,3}[0-9]{1,4}$"
+)
+
+_RE_LEGACY_PLATE = re.compile(
+    r"^[A-Z]{2}[A-Z]{1,2}[0-9]{1,4}$"
+)
+
+
+def strict_indian_plate(text: str) -> bool:
+    """True when the string is a valid Indian registration number
+    under the current OR legacy series with a REAL state code."""
+
+    s = clean_text(text)
+
+    if not 5 <= len(s) <= 10:
+        return False
+
+    if s[:2] not in INDIAN_STATE_CODES:
+        return False
+
+    return bool(
+        _RE_CURRENT_PLATE.match(s)
+        or _RE_LEGACY_PLATE.match(s)
+    )
+
+
+# Format adjustments used by candidate selection (0-100 legacy score
+# still feeds validation display; these adjust the SELECTION score).
+
+_STRICT_FORMAT_BONUS = 22.0
+_INVALID_FORMAT_PENALTY = 12.0
+_UNKNOWN_STATE_PENALTY = 18.0
+
+
+def _strict_format_adjustment(text: str) -> float:
+    """Signed format adjustment for a candidate string."""
+
+    s = clean_text(text)
+
+    if strict_indian_plate(s):
+        return _STRICT_FORMAT_BONUS
+
+    penalty = 0.0
+
+    if len(s) >= 2 and s[:2].isalpha() and s[:2] not in INDIAN_STATE_CODES:
+        penalty += _UNKNOWN_STATE_PENALTY
+
+    if s:
+        penalty += _INVALID_FORMAT_PENALTY
+
+    return -penalty
+
+
+# ------------------------------------------------------------
+# Per-character CTC confidence capture.
+#
+# EasyOCR's recognizer_predict() computes a max class probability for
+# EVERY output timestep but only reports custom_mean() of them, and
+# get_text()'s merge rebuilds rows as (box, text, conf) — dropping
+# anything extra. So the ONLY way to surface per-character evidence
+# is a behavior-preserving re-implementation of those two functions
+# whose rows additionally carry the per-character probability list:
+#
+#     recognizer_predict -> [pred, conf, char_probs]
+#     get_text           -> (box, text, conf, char_probs)
+#
+# Text and confidence stay BIT-IDENTICAL to stock EasyOCR (the same
+# arrays, the same custom_mean). The copies are guarded: they are
+# installed only when the installed EasyOCR's own source still
+# contains the tokens this re-implementation relies on; on any
+# mismatch the hook stays off, char evidence is simply None, and the
+# pipeline degrades gracefully to mean-confidence-only selection.
+# ------------------------------------------------------------
+
+_char_conf_hook_installed = False
+_char_conf_hook_failed = False
+
+# Tokens that must appear in the installed EasyOCR source for the
+# re-implementation to be considered safe.
+_PREDICT_TOKENS = ("custom_mean", "preds_max_prob", "decode_greedy")
+_GET_TEXT_TOKENS = ("contrast_ths", "AlignCollate", "low_confident_idx")
+
+
+def _install_char_conf_hook() -> None:
+
+    global _char_conf_hook_installed, _char_conf_hook_failed
+
+    if _char_conf_hook_installed or _char_conf_hook_failed:
+        return
+
+    _char_conf_hook_installed = True
+
+    try:
+        import inspect
+
+        import easyocr.recognition as _recog
+
+        predict_src = inspect.getsource(_recog.recognizer_predict)
+        get_text_src = inspect.getsource(_recog.get_text)
+
+        if (
+            not all(tok in predict_src for tok in _PREDICT_TOKENS)
+            or not all(tok in get_text_src for tok in _GET_TEXT_TOKENS)
+        ):
+            raise RuntimeError("easyocr source drift")
+
+        import numpy as _np
+        import torch
+        import torch.nn.functional as _F
+
+        def _predict_with_chars(
+            model,
+            converter,
+            test_loader,
+            batch_max_length,
+            ignore_idx,
+            char_group_idx,
+            decoder="greedy",
+            beamWidth=5,
+            device="cpu",
+        ):
+            model.eval()
+            result = []
+
+            with torch.no_grad():
+                for image_tensors in test_loader:
+                    batch_size = image_tensors.size(0)
+                    image = image_tensors.to(device)
+
+                    length_for_pred = torch.IntTensor(
+                        [batch_max_length] * batch_size
+                    ).to(device)
+                    text_for_pred = torch.LongTensor(
+                        batch_size, batch_max_length + 1
+                    ).fill_(0).to(device)
+
+                    preds = model(image, text_for_pred)
+                    preds_size = torch.IntTensor([preds.size(1)] * batch_size)
+
+                    # ---- identical to stock easyocr 1.7.2 ----
+                    preds_prob = _F.softmax(preds, dim=2)
+                    preds_prob = preds_prob.cpu().detach().numpy()
+                    preds_prob[:, :, ignore_idx] = 0.
+                    pred_norm = preds_prob.sum(axis=2)
+                    preds_prob = preds_prob / _np.expand_dims(
+                        pred_norm, axis=-1
+                    )
+                    preds_prob = torch.from_numpy(preds_prob).float().to(device)
+
+                    if decoder == "greedy":
+                        _, preds_index = preds_prob.max(2)
+                        preds_index = preds_index.view(-1)
+                        preds_str = converter.decode_greedy(
+                            preds_index.data.cpu().detach().numpy(),
+                            preds_size.data,
+                        )
+                    elif decoder == "beamsearch":
+                        k = preds_prob.cpu().detach().numpy()
+                        preds_str = converter.decode_beamsearch(
+                            k, beamWidth=beamWidth
+                        )
+                    elif decoder == "wordbeamsearch":
+                        k = preds_prob.cpu().detach().numpy()
+                        preds_str = converter.decode_wordbeamsearch(
+                            k, beamWidth=beamWidth
+                        )
+                    else:
+                        preds_str = []
+
+                    preds_prob_np = preds_prob.cpu().detach().numpy()
+                    values = preds_prob_np.max(axis=2)
+                    indices = preds_prob_np.argmax(axis=2)
+
+                    preds_max_prob = []
+
+                    for v, i in zip(values, indices):
+                        max_probs = v[i != 0]
+                        if len(max_probs) > 0:
+                            preds_max_prob.append(max_probs)
+                        else:
+                            preds_max_prob.append(_np.array([0]))
+
+                    for batch_elem, (pred, pred_max_prob) in enumerate(
+                        zip(preds_str, preds_max_prob)
+                    ):
+                        confidence_score = _recog.custom_mean(pred_max_prob)
+
+                        # ---- per-character alignment (greedy only) ----
+                        # Collapse CTC repeats exactly like decode_greedy:
+                        # skip blank steps and repeat continuations; the
+                        # remaining step probabilities align 1:1 with the
+                        # decoded characters.
+                        char_probs = None
+
+                        if decoder == "greedy":
+                            step_indices = indices[batch_elem]
+                            step_values = values[batch_elem]
+
+                            collapsed: list[float] = []
+                            prev = -1
+                            aligned = True
+
+                            for step in range(len(step_indices)):
+                                cur = int(step_indices[step])
+
+                                if cur in ignore_idx:
+                                    aligned = False
+                                    break
+
+                                if cur == 0 or cur == prev:
+                                    prev = cur
+                                    continue
+
+                                collapsed.append(float(step_values[step]))
+                                prev = cur
+
+                            if aligned and len(collapsed) == len(pred):
+                                char_probs = collapsed
+
+                        result.append([pred, confidence_score, char_probs])
+
+            return result
+
+        def _get_text_with_chars(
+            character,
+            imgH,
+            imgW,
+            recognizer,
+            converter,
+            image_list,
+            ignore_char="",
+            decoder="greedy",
+            beamWidth=5,
+            batch_size=1,
+            contrast_ths=0.1,
+            adjust_contrast=0.5,
+            filter_ths=0.003,
+            workers=1,
+            device="cpu",
+        ):
+            batch_max_length = int(imgW / 10)
+
+            char_group_idx: dict = {}
+            ignore_idx: list[int] = []
+
+            for char in ignore_char:
+                try:
+                    ignore_idx.append(character.index(char) + 1)
+                except Exception:
+                    pass
+
+            coord = [item[0] for item in image_list]
+            img_list = [item[1] for item in image_list]
+
+            AlignCollate_normal = _recog.AlignCollate(
+                imgH=imgH,
+                imgW=imgW,
+                keep_ratio_with_pad=True,
+            )
+            test_data = _recog.ListDataset(img_list)
+            test_loader = torch.utils.data.DataLoader(
+                test_data,
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=int(workers),
+                collate_fn=AlignCollate_normal,
+                pin_memory=True,
+            )
+
+            # predict first round
+            result1 = _predict_with_chars(
+                recognizer,
+                converter,
+                test_loader,
+                batch_max_length,
+                ignore_idx,
+                char_group_idx,
+                decoder,
+                beamWidth,
+                device=device,
+            )
+
+            # predict second round
+            low_confident_idx = [
+                i for i, item in enumerate(result1)
+                if (item[1] < contrast_ths)
+            ]
+
+            if len(low_confident_idx) > 0:
+                img_list2 = [img_list[i] for i in low_confident_idx]
+
+                AlignCollate_contrast = _recog.AlignCollate(
+                    imgH=imgH,
+                    imgW=imgW,
+                    keep_ratio_with_pad=True,
+                    adjust_contrast=adjust_contrast,
+                )
+                test_data2 = _recog.ListDataset(img_list2)
+                test_loader2 = torch.utils.data.DataLoader(
+                    test_data2,
+                    batch_size=batch_size,
+                    shuffle=False,
+                    num_workers=int(workers),
+                    collate_fn=AlignCollate_contrast,
+                    pin_memory=True,
+                )
+
+                result2 = _predict_with_chars(
+                    recognizer,
+                    converter,
+                    test_loader2,
+                    batch_max_length,
+                    ignore_idx,
+                    char_group_idx,
+                    decoder,
+                    beamWidth,
+                    device=device,
+                )
+
+            result = []
+
+            for i, zipped in enumerate(zip(coord, result1)):
+                box, pred1 = zipped
+
+                if i in low_confident_idx:
+                    pred2 = result2[low_confident_idx.index(i)]
+
+                    if pred1[1] > pred2[1]:
+                        result.append(
+                            (box, pred1[0], pred1[1], pred1[2])
+                        )
+                    else:
+                        result.append(
+                            (box, pred2[0], pred2[1], pred2[2])
+                        )
+                else:
+                    result.append(
+                        (box, pred1[0], pred1[1], pred1[2])
+                    )
+
+            return result
+
+        # recognize() calls the get_text it imported into easyocr's own
+        # module namespace at import time, so BOTH bindings must point
+        # at the instrumented copy.
+        import easyocr as _easyocr_pkg
+        import easyocr.easyocr as _easyocr_mod
+
+        _recog.recognizer_predict = _predict_with_chars
+        _recog.get_text = _get_text_with_chars
+        _easyocr_mod.get_text = _get_text_with_chars
+        if hasattr(_easyocr_pkg, "get_text"):
+            _easyocr_pkg.get_text = _get_text_with_chars
+
+    except Exception:
+        _char_conf_hook_failed = True
+
+
+# ------------------------------------------------------------
+# Edge-character evidence.
+# ------------------------------------------------------------
+
+# Ambiguous glyph pairs that genuinely swap on Indian plates (stamped
+# zeros vs O, serif ones vs I, etc.). Used ONLY by the narrow repair
+# rule below: a candidate one swap away from strict validity, where
+# the recognizer itself was unsure about that glyph.
+_AMBIGUOUS_CHARS = {
+    "O": "0",
+    "0": "O",
+    "I": "1",
+    "1": "I",
+    "S": "5",
+    "5": "S",
+    "B": "8",
+    "8": "B",
+}
+
+# The recognizer's per-character probability for the swapped glyph
+# must be BELOW this for a repair to be generated — overriding a
+# confident read would be guesswork, not evidence.
+_REPAIR_UNSURE_BELOW = 0.75
+
+# Repaired candidates carry a small confidence discount: the swap is
+# format-driven, so they must not beat the raw read on confidence
+# alone — only on combined structure + confidence evidence.
+_REPAIR_CONF_DISCOUNT = 0.90
+
+# Hard cap on generated repairs per plate (bounds selection cost).
+_MAX_REPAIRS = 8
+
+
+def _generate_format_repairs(
+    tier_evidence: list[tuple[int, list]],
+) -> list[tuple[str, float, list[float] | None]]:
+    """Add format-repaired variants of near-miss candidates.
+
+    A candidate one or two ambiguous glyphs (O/0, I/1, S/5, B/8) away
+    from strict validity earns extra candidates with those glyphs
+    swapped — but ONLY positions where the recognizer's own
+    per-character probability shows it was UNSURE. Originals are never
+    removed or edited; repaired strings compete on the same evidence
+    scale with a small confidence discount.
+
+    KL01AP8921 is preserved as-is; KLO1AP8921 gains KL01AP8921 as a
+    rival only if the recognizer was unsure about the O. A confident
+    misread is never overridden — that would be guesswork, not
+    evidence.
+    """
+
+    repairs: list[tuple[str, float, list[float] | None]] = []
+
+    seen_sources: set[str] = set()
+    seen_fixed: set[str] = set()
+
+    for _tier, candidates in tier_evidence:
+
+        for item in candidates:
+
+            text = clean_text(item[0])
+
+            if not text or len(text) < 5 or text in seen_sources:
+                continue
+
+            seen_sources.add(text)
+
+            if strict_indian_plate(text):
+                continue
+
+            probs = item[2] if len(item) > 2 else None
+            conf = float(item[1])
+
+            # Positions where an ambiguous glyph sits.
+            swap_positions: list[tuple[int, bool]] = []
+            # (position, glyph_was_unsure)
+
+            for i, ch in enumerate(text):
+
+                if ch not in _AMBIGUOUS_CHARS:
+                    continue
+
+                unsure = True
+
+                if (
+                    probs is not None
+                    and i < len(probs)
+                    and probs[i] >= _REPAIR_UNSURE_BELOW
+                ):
+                    unsure = False
+
+                swap_positions.append((i, unsure))
+
+            if not swap_positions:
+                continue
+
+            # Single swaps: the source string is ALREADY format-invalid,
+            # so one ambiguous-glyph swap that lands on a strictly valid
+            # registration is backed by strong format evidence even when
+            # the recognizer was confident (stamped zeros read as solid
+            # 'O's). Pairs are more speculative and require the
+            # recognizer to have been unsure at BOTH positions.
+            swap_sets: list[tuple[int, ...]] = [
+                (i,) for i, _ in swap_positions
+            ]
+
+            unsure_only = [
+                i for i, unsure in swap_positions if unsure
+            ]
+
+            swap_sets += [
+                (a, b)
+                for ai, a in enumerate(unsure_only)
+                for b in unsure_only[ai + 1 :]
+            ]
+
+            for swaps in swap_sets:
+
+                fixed = list(text)
+
+                for i in swaps:
+                    fixed[i] = _AMBIGUOUS_CHARS[fixed[i]]
+
+                fixed_str = "".join(fixed)
+
+                if (
+                    not strict_indian_plate(fixed_str)
+                    or fixed_str in seen_fixed
+                ):
+                    continue
+
+                seen_fixed.add(fixed_str)
+
+                repaired_probs: list[float] | None = None
+
+                if probs is not None and len(probs) == len(text):
+                    # Keep the ORIGINAL uncertainties on the swapped
+                    # positions: the repair inherits the read's doubt.
+                    repaired_probs = list(probs)
+
+                repairs.append(
+                    (
+                        fixed_str,
+                        conf * _REPAIR_CONF_DISCOUNT,
+                        repaired_probs,
+                    )
+                )
+
+                if len(repairs) >= _MAX_REPAIRS:
+                    return repairs
+
+    return repairs
+
+# Fraction of a candidate's characters treated as its edges.
+_EDGE_FRACTION = 0.20
+
+# A hallucinated edge usually rests on 1-2 weak CTC steps.
+_EDGE_MIN_STEPS = 2
+
+# How strongly weak edges pull a candidate down (on the ~0-140
+# selection scale: conf terms max ~50, format terms ~50).
+_EDGE_CONF_PENALTY = 45.0
+
+# Edge mean-probability at or above which no penalty applies. A real
+# character the recognizer is sure of sits at 0.85-1.0; a hallucinated
+# frame/margin character typically rests on 0.1-0.4 steps.
+_EDGE_CONF_PENALTY_THRESHOLD = 0.60
+
+
+def _first_last_conf(
+    text: str,
+    char_conf: list[float] | None,
+) -> tuple[float, int] | None:
+    """Mean CTC probability of the candidate's leading/trailing
+    characters, and how many steps backed it.
+
+    Returns None when no per-character evidence is available.
+    """
+
+    if not char_conf:
+        return None
+
+    text = clean_text(text)
+
+    if not text:
+        return None
+
+    k = min(
+        _EDGE_MIN_STEPS,
+        max(1, int(len(text) * _EDGE_FRACTION)),
+    )
+
+    lead = char_conf[:k]
+    tail = char_conf[-k:]
+
+    steps = len(lead) + len(tail)
+
+    if steps == 0:
+        return None
+
+    return sum(lead + tail) / steps, steps
+
+
+# ------------------------------------------------------------
+# Dominant structural run.
+#
+#    KL01AP8921   ->  9  (state + district + series + serial)
+#    KKL91APB924  ->  4  (double letter + 9-series junk)
+#    KL01AP892    ->  8  (truncated serial, still structured)
+# ------------------------------------------------------------
+
+_STRUCT_RUN_RE = re.compile(
+    r"^[A-Z]{2}(?:0[1-9]|[12][0-9]|3[0-8])?[A-Z]{0,3}"
+)
+
+
+def _score_dominant_run(text: str) -> int:
+
+    m = _STRUCT_RUN_RE.match(clean_text(text))
+
+    return len(m.group(0)) if m else 0
+
+
+def _edge_supported_in(text: str, candidates: list) -> bool:
+    """True when the candidate's own per-character evidence supports its
+    first/last characters.
+
+    No char evidence (hook unavailable / candidate not found) counts as
+    supported — absence of evidence never rejects, it only stops
+    granting the extra trust.
+    """
+
+    wanted = clean_text(text)
+
+    for item in candidates:
+        if clean_text(item[0]) != wanted:
+            continue
+
+        probs = item[2] if len(item) > 2 else None
+        edge = _first_last_conf(wanted, probs)
+
+        if edge is None:
+            return True
+
+        return edge[0] >= _EDGE_CONF_PENALTY_THRESHOLD
+
+    return True
+
+
 def classify_validation(score: int) -> str:
     if score >= 75:
         return "INDIAN_PLATE"
@@ -520,6 +1187,34 @@ def _prepare_ocr_canvas(crop: np.ndarray) -> np.ndarray:
         (target_w, target_h),
         interpolation=interp,
     )
+
+
+def _canvas_gray(crop: np.ndarray) -> np.ndarray:
+    """Shared OCR canvas for the whole-crop tiers: aspect-preserving
+    resize, grayscale, then a conservative trim to the crop's actual
+    text region.
+
+    The trim (frame lines + margins removed) is what keeps the
+    recognizer from seeing plate-rim strokes and empty edges as phantom
+    leading/trailing characters (KL01AP8921 -> LKL0AP8921). It only
+    runs when the canvas is large enough to survive it; small crops
+    pass through untouched.
+    """
+
+    base = _prepare_ocr_canvas(crop)
+
+    gray = cv2.cvtColor(
+        base,
+        cv2.COLOR_BGR2GRAY,
+    )
+
+    if (
+        gray.shape[0] >= 24
+        and gray.shape[1] >= 40
+    ):
+        gray = _tight_text_region(gray)
+
+    return gray
 
 
 def _variant_primary(
@@ -1062,17 +1757,29 @@ def _recognize_bands(
         return []
 
     combined = "".join(
-        text for text, _ in band_reads
+        text for text, _, _ in band_reads
     )
 
     if not combined:
         return []
 
     combined_conf = min(
-        conf for _, conf in band_reads
+        conf for _, conf, _ in band_reads
     )
 
-    return [(combined, combined_conf)]
+    # Concatenate the per-character probabilities of both bands so the
+    # joined candidate keeps full edge evidence (leading char of band 1,
+    # trailing char of band 2).
+    combined_probs: list[float] | None = []
+
+    for _, _, probs in band_reads:
+        if probs is None:
+            combined_probs = None
+            break
+
+        combined_probs.extend(probs)
+
+    return [(combined, combined_conf, combined_probs)]
 
 
 # ============================================================
@@ -1102,6 +1809,10 @@ def _candidate_score(
         float(ocr_conf) * 35.0
         + format_score * 0.90
         + length_score
+        # Real-format validation on top of the legacy heuristic:
+        # a strict match (real state code + valid series) is rewarded,
+        # near-miss junk is penalized.
+        + _strict_format_adjustment(text)
     )
 
 
@@ -1111,7 +1822,7 @@ def _candidate_score(
 
 def _run_ocr(
     image: np.ndarray,
-) -> list[tuple[str, float]]:
+) -> list[tuple[str, float, list[float] | None]]:
     """
     Run exactly one EasyOCR recognizer pass on a plate crop.
 
@@ -1122,6 +1833,10 @@ def _run_ocr(
     have. recognize() reads the crop as one text line and returns the
     same (text, confidence) evidence the cascade expects.
 
+    Each candidate additionally carries the recognizer's per-character
+    CTC probabilities (None when the capture hook is unavailable), used
+    by the selectors to distrust weakly-evidenced edge characters.
+
     Evidence contract (multi-line support):
     recognize() on a multi-band image returns one entry per segment.
     Single-segment results are returned exactly as before. Multi-segment
@@ -1131,6 +1846,9 @@ def _run_ocr(
     it can only gain candidates.
     """
 
+    # One-time, lazy: keeps model import out of module import time.
+    _install_char_conf_hook()
+
     try:
         import torch
 
@@ -1139,6 +1857,13 @@ def _run_ocr(
                 image,
                 detail=1,
                 paragraph=False,
+                # Speed: EasyOCR's default contrast_ths=0.1 reruns the
+                # whole recognizer a second time on every low-confidence
+                # read (contrast-boosted). Our cascade already retries
+                # with genuinely different preprocessing (OTSU, denoise)
+                # and a structure-aware selector, so the internal retry
+                # is redundant work on the free tier.
+                contrast_ths=0.0,
                 # "-" is allowed so the separator stamped on many Indian
                 # plates ("37-N1") maps to a hyphen glyph instead of
                 # being forced onto the nearest alphanumeric (usually a
@@ -1153,16 +1878,51 @@ def _run_ocr(
         return []
 
     segments: list[
-        tuple[float, float, str, float]
+        tuple[float, float, str, float, list[float] | None]
     ] = []
-    # (y_center, x_center, cleaned_text, confidence)
+    # (y_center, x_center, cleaned_text, confidence, char_probs)
 
-    for box, text, conf in results:
+    for item in results:
+
+        box, text, conf = item[0], item[1], item[2]
+
+        char_probs: list[float] | None = None
+
+        if len(item) > 3 and isinstance(item[3], (list, tuple)):
+            char_probs = [float(p) for p in item[3]]
 
         cleaned = clean_text(text)
 
         if not cleaned:
             continue
+
+        # clean_text() strips '-' (and any separator); drop the
+        # corresponding probability steps so the list stays aligned
+        # with the kept characters.
+        if (
+            char_probs is not None
+            and len(char_probs) != len(cleaned)
+        ):
+            # Rebuild alignment from the RAW text (before '-' removal):
+            # walk raw chars, keep the prob of every char that survives
+            # cleaning.
+            kept_probs: list[float] = []
+            raw_clean = clean_text(text)
+            ri = 0
+
+            for ch, p in zip(str(text).upper(), char_probs):
+                if ch in ("-", " "):
+                    continue
+
+                if ri < len(raw_clean) and ch == raw_clean[ri]:
+                    kept_probs.append(p)
+                    ri += 1
+
+            char_probs = (
+                kept_probs
+                if len(kept_probs) == len(cleaned)
+                else None
+            )
 
         if box and len(box) > 0:
             ys = [float(p[1]) for p in box]
@@ -1174,15 +1934,15 @@ def _run_ocr(
             x_center = 0.0
 
         segments.append(
-            (y_center, x_center, cleaned, float(conf))
+            (y_center, x_center, cleaned, float(conf), char_probs)
         )
 
     if not segments:
         return []
 
     candidates = [
-        (text, conf)
-        for _, _, text, conf in segments
+        (text, conf, probs)
+        for _, _, text, conf, probs in segments
     ]
 
     if len(segments) > 1:
@@ -1196,16 +1956,29 @@ def _run_ocr(
         )
 
         joined = "".join(
-            text for _, _, text, _ in ordered
+            text for _, _, text, _, _ in ordered
         )
 
         joined_conf = min(
-            conf for _, _, _, conf in ordered
+            conf for _, _, _, conf, _ in ordered
         )
+
+        joined_probs: list[float] | None = []
+
+        for _, _, _, _, probs in ordered:
+            if probs is None:
+                joined_probs = None
+                break
+
+            joined_probs.extend(probs)
 
         if joined:
             candidates.append(
-                (joined, joined_conf)
+                (
+                    joined,
+                    joined_conf,
+                    joined_probs if joined_probs else None,
+                )
             )
 
     return candidates
@@ -1241,7 +2014,7 @@ def _sequence_similarity(a: str, b: str) -> float:
 def _log_ocr_candidates(
     plate_index: int,
     tier_name: str,
-    candidates: list[tuple[str, float]],
+    candidates: list,
 ) -> None:
     """Log OCR candidates for debugging without affecting inference."""
     if not candidates:
@@ -1253,8 +2026,8 @@ def _log_ocr_candidates(
         return
 
     formatted = ", ".join(
-        f"{text} ({conf:.3f})"
-        for text, conf in candidates
+        f"{item[0]} ({item[1]:.3f})"
+        for item in candidates
     )
 
     logger.info(
@@ -1266,34 +2039,36 @@ def _log_ocr_candidates(
 
 
 def _evidence_select(
-    tier_candidates: list[tuple[int, list[tuple[str, float]]]],
+    tier_candidates: list[tuple[int, list]],
 ):
-    """Select the most plausible plate using structure, confidence and agreement."""
-    all_candidates: list[tuple[str, float, int]] = []
+    """Select the most plausible plate using structure, confidence,
+    agreement, real-format validation and edge-character evidence."""
+    all_candidates: list[tuple[str, float, int, list[float] | None]] = []
 
     for tier_index, candidates in tier_candidates:
-        for text, conf in candidates:
-            text = clean_text(text)
+        for item in candidates:
+            text = clean_text(item[0])
             if text and len(text) >= 6:
-                all_candidates.append((text, float(conf), tier_index))
+                probs = item[2] if len(item) > 2 else None
+                all_candidates.append((text, float(item[1]), tier_index, probs))
 
     if not all_candidates:
         return None
 
-    groups: dict[str, list[tuple[float, int]]] = defaultdict(list)
-    for text, conf, tier in all_candidates:
-        groups[text].append((conf, tier))
+    groups: dict[str, list[tuple[float, int, list[float] | None]]] = defaultdict(list)
+    for text, conf, tier, probs in all_candidates:
+        groups[text].append((conf, tier, probs))
 
     scored = []
     for text, observations in groups.items():
-        confs = [c for c, _ in observations]
+        confs = [c for c, _, _ in observations]
         avg_conf = sum(confs) / len(confs)
         max_conf = max(confs)
         votes = len(observations)
         format_score = indian_plate_score(text)
 
         primary_conf = max(
-            (c for c, tier in observations if tier == 1),
+            (c for c, tier, _ in observations if tier == 1),
             default=0.0,
         )
         agreement_bonus = min(votes - 1, 2) * 7.0
@@ -1304,6 +2079,22 @@ def _evidence_select(
             else 0.0
         )
 
+        # Edge-character evidence: use the per-character probabilities
+        # of the best-observed read of this text. Hallucinated leading/
+        # trailing characters (frame strokes, crop margins) rest on
+        # low-probability CTC steps.
+        best_obs = max(observations, key=lambda o: o[0])
+        edge = _first_last_conf(text, best_obs[2])
+
+        edge_penalty = 0.0
+
+        if edge is not None and edge[0] < _EDGE_CONF_PENALTY_THRESHOLD:
+            edge_penalty = (
+                _EDGE_CONF_PENALTY
+                * (_EDGE_CONF_PENALTY_THRESHOLD - edge[0])
+                / _EDGE_CONF_PENALTY_THRESHOLD
+            )
+
         score = (
             max_conf * 35.0
             + avg_conf * 15.0
@@ -1312,6 +2103,8 @@ def _evidence_select(
             + length_bonus
             + agreement_bonus
             + primary_conf * 8.0
+            + _strict_format_adjustment(text)
+            - edge_penalty
         )
 
         scored.append((text, avg_conf, votes, score, format_score))
@@ -1326,36 +2119,75 @@ def _evidence_select(
     return best_text, best_conf, best_votes
 
 
-def _consensus_select(
-    candidates: list[tuple[str, float]],
+def _finalize_selection(
+    tier_evidence: list[tuple[int, list]],
 ):
-    """Select the best candidate from one OCR pass using plate structure."""
+    """Production selection pipeline: evidence-gated format repairs join
+    as tier 5, then the weighted evidence ranking decides. Shared by the
+    API path and the benchmark harness so both measure the same thing.
+
+    Returns (best, repairs).
+    """
+
+    repairs = _generate_format_repairs(tier_evidence)
+
+    if repairs:
+        tier_evidence.append((5, repairs))
+
+    return _evidence_select(tier_evidence), repairs
+
+
+def _consensus_select(
+    candidates: list,
+):
+    """Select the best candidate from one OCR pass using plate structure,
+    real-format validation and edge-character evidence."""
     if not candidates:
         return None
 
-    groups: dict[str, list[float]] = defaultdict(list)
+    groups: dict[str, list[tuple[float, list[float] | None]]] = defaultdict(list)
 
-    for text, conf in candidates:
-        text = clean_text(text)
+    for item in candidates:
+        text = clean_text(item[0])
         if not text or len(text) < 6:
             continue
-        groups[text].append(float(conf))
+        probs = item[2] if len(item) > 2 else None
+        groups[text].append((float(item[1]), probs))
 
     if not groups:
         return None
 
     scored = []
-    for text, confs in groups.items():
+    for text, observations in groups.items():
+        confs = [c for c, _ in observations]
         votes = len(confs)
         avg_conf = sum(confs) / votes
         format_score = indian_plate_score(text)
         consensus_bonus = min(votes - 1, 2) * 7.0
+
+        best_probs = max(
+            observations,
+            key=lambda o: o[0],
+        )[1]
+
+        edge = _first_last_conf(text, best_probs)
+
+        edge_penalty = 0.0
+
+        if edge is not None and edge[0] < _EDGE_CONF_PENALTY_THRESHOLD:
+            edge_penalty = (
+                _EDGE_CONF_PENALTY
+                * (_EDGE_CONF_PENALTY_THRESHOLD - edge[0])
+                / _EDGE_CONF_PENALTY_THRESHOLD
+            )
 
         score = (
             avg_conf * 35.0
             + format_score * 0.90
             + (20.0 if 8 <= len(text) <= 12 else 8.0 if 6 <= len(text) <= 13 else 0.0)
             + consensus_bonus
+            + _strict_format_adjustment(text)
+            - edge_penalty
         )
 
         scored.append((text, avg_conf, votes, score))
@@ -1616,13 +2448,8 @@ def run_detection_on_image(
 
             t0 = time.perf_counter()
 
-            base = _prepare_ocr_canvas(
+            base_gray = _canvas_gray(
                 crop
-            )
-
-            base_gray = cv2.cvtColor(
-                base,
-                cv2.COLOR_BGR2GRAY,
             )
 
             timing.add(
@@ -1739,8 +2566,25 @@ def run_detection_on_image(
                 # TIER 3 — DENOISE LAST RESORT
                 # =================================================
 
+                # Skip when Tier 2 contributed nothing new: if OTSU
+                # produced no candidate that Tier 1 hadn't already
+                # produced, a denoised OTSU (nearly the same image)
+                # will not either — and Tier 4 handles the layouts
+                # where whole-crop reading fundamentally fails.
+                tier2_new = any(
+                    clean_text(item[0])
+                    not in {
+                        clean_text(prev[0])
+                        for prev in tier1_candidates
+                    }
+                    for item in tier2_candidates
+                )
+
                 # Only run Tier 3 if the combined evidence is still weak.
-                if best is None or not _is_strong_enough(best):
+                if (
+                    (best is None or not _is_strong_enough(best))
+                    and tier2_new
+                ):
 
                     t0 = time.perf_counter()
 
@@ -1802,9 +2646,20 @@ def run_detection_on_image(
                 / max(float(base_gray.shape[1]), 1.0)
             )
 
+            # A whole-crop read whose EDGE characters are not backed by
+            # the recognizer's own per-character probabilities is weak
+            # evidence too (phantom leading/trailing chars): let the
+            # multi-line tier try before settling.
             whole_crop_weak = (
                 best is None
                 or not _is_strong_enough(best)
+                or (
+                    best is not None
+                    and not _edge_supported_in(
+                        best[0],
+                        tier1_candidates,
+                    )
+                )
             )
 
             if (
@@ -1875,9 +2730,18 @@ def run_detection_on_image(
             if tier_evidence:
                 t0 = time.perf_counter()
 
-                evidence_best = _evidence_select(
+                # Narrow, evidence-gated format repairs (O/0, I/1, ...)
+                # join as extra candidates before the final ranking.
+                evidence_best, repairs = _finalize_selection(
                     tier_evidence
                 )
+
+                if repairs:
+                    _log_ocr_candidates(
+                        idx,
+                        "format-repairs",
+                        repairs,
+                    )
 
                 if evidence_best is not None:
                     best = evidence_best
@@ -1916,6 +2780,25 @@ def run_detection_on_image(
                     ) * 0.4,
                 )
 
+                # Per-character evidence of the winning read (for the
+                # API/debug consumers; None when unavailable). The win
+                # may come from any tier, so scan all collected evidence.
+                _win_probs = next(
+                    (
+                        item[2]
+                        for _tier, cands in tier_evidence
+                        for item in cands
+                        if len(item) > 2
+                        and clean_text(item[0]) == best_text
+                        and item[2] is not None
+                    ),
+                    None,
+                )
+                win_edge = _first_last_conf(
+                    best_text,
+                    _win_probs,
+                )
+
                 plate_entry.update(
                     {
                         "ocr_text": best_text,
@@ -1932,6 +2815,14 @@ def run_detection_on_image(
                         "status": status_from_confidence(
                             final_confidence,
                             best_text,
+                        ),
+                        "strict_format": strict_indian_plate(
+                            best_text
+                        ),
+                        "edge_confidence": (
+                            round(win_edge[0], 4)
+                            if win_edge is not None
+                            else None
                         ),
                     }
                 )
