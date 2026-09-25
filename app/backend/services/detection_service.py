@@ -1040,15 +1040,39 @@ def status_from_confidence(
 # accuracy gain.
 _MAX_INFER_SIDE = 1280
 
-# Keep the bounded OCR canvas.
+# Bounded OCR canvas.
 #
-# The old implementation used a distorted 1800x600 canvas.
-# This preserves aspect ratio and limits CPU work.
-
-_OCR_MAX_DIM = 1100
+# The old implementation used a distorted 1800x600 canvas; 1100
+# preserved aspect ratio. 900 was A/B-tested on real crops: identical
+# selection outcomes at ~11% less recognizer time per pass (the
+# recognizer resizes to a fixed 64px height anyway; extra width mostly
+# costs CPU on blank steps).
+_OCR_MAX_DIM = 900
 
 # Don't excessively enlarge tiny crops.
 _OCR_MAX_UPSCALE = 6.0
+
+# ------------------------------------------------------------
+# Effort policy (evidence-based latency bounding).
+#
+# The historical batch run (batch_results/batch_results.csv, 658
+# images) recorded EVERY box below 0.45 YOLO confidence as junk:
+# 9/9 produced empty or 2-character OCR output. Meanwhile the strong
+# population sits at 0.71-0.94. A sub-0.45 box is therefore almost
+# always a wheel arch / headlight / shadow — and running the full
+# multi-variant cascade on such a crop burns CPU seconds to produce
+# the 27%-confidence reads seen in production. Effort is spent where
+# the evidence says plates actually are.
+# ------------------------------------------------------------
+
+# Boxes at/above this get the full cascade; below it, a bounded
+# primary (+ one fallback only when the primary read nothing).
+_MIN_FULL_EFFORT_YOLO_CONF = 0.45
+
+# Hard cap on boxes that receive OCR per image. Real images carry
+# 1-2 plates; the cap only bites when NMS misfires badly, bounding
+# worst-case latency multiplicatively.
+_MAX_OCR_BOXES = 3
 
 
 # ============================================================
@@ -1677,12 +1701,13 @@ def _recognize_bands(
 
         "37-N1" over "4635"  ->  combined "37N14635"
 
-    Each band is tried on at most two lightweight variants — the CLAHE
-    enhancement shared with the whole-crop tiers, and the plain grayscale
+    Each band is read on the CLAHE enhancement first; the plain
+    grayscale is tried ONLY when the CLAHE read came back empty or weak
     (CLAHE amplifies sensor noise on clean/flat plates, which corrupts
-    band reads) — and the higher-confidence read wins. One recognizer
-    pass per variant, small crops only. Returns [] when fewer than two
-    bands produced text (a split of a true single-line plate).
+    band reads — but on the majority of bands the plain retry would be
+    a duplicate pass). Small crops, one recognizer pass per variant
+    actually needed. Returns [] when fewer than two bands produced text
+    (a split of a true single-line plate).
     """
 
     band_reads: list[tuple[str, float]] = []
@@ -1695,6 +1720,15 @@ def _recognize_bands(
 
             if source is None:
                 continue
+
+            # After a decent CLAHE read, the plain-gray retry is a
+            # duplicate pass, not new evidence.
+            if (
+                source is plain_gray
+                and best_read is not None
+                and best_read[1] >= 0.35
+            ):
+                break
 
             band = source[
                 max(0, y0):max(0, y1),
@@ -2362,6 +2396,13 @@ def run_detection_on_image(
         reverse=True,
     )
 
+    # Bounded OCR effort: at most _MAX_OCR_BOXES boxes ever reach the
+    # OCR cascade (real images carry 1-2 plates; the cap only bites on
+    # NMS misfires). Lower-confidence boxes beyond the cap are still
+    # reported (bbox + YOLO confidence, status OCR_FAILED) so the API
+    # response keeps describing every detection.
+    ocr_eligible = detections[:_MAX_OCR_BOXES]
+
     plates = []
 
     annotated = image.copy()
@@ -2440,7 +2481,7 @@ def run_detection_on_image(
         # OCR
         # ====================================================
 
-        if crop.size > 0:
+        if crop.size > 0 and idx <= len(ocr_eligible):
 
             # ------------------------------------------------
             # Crop / resize / grayscale
@@ -2510,11 +2551,23 @@ def run_detection_on_image(
                 time.perf_counter() - t0,
             )
 
+            # ------------------------------------------------------------
+            # Effort policy: the historical batch run recorded every box
+            # below 0.45 YOLO confidence as producing junk OCR. Such boxes
+            # get one cheap pass; the strong confidence they lack never
+            # materializes, so tiers 2-4 are skipped unless tier 1 read
+            # literally nothing (then one fallback is spent, bounded).
+            # ------------------------------------------------------------
+            low_effort = (
+                yolo_conf < _MIN_FULL_EFFORT_YOLO_CONF
+                and best is not None
+            )
+
             # =================================================
             # TIER 2 — OTSU FALLBACK
             # =================================================
 
-            if not _is_strong_enough(best):
+            if not low_effort and not _is_strong_enough(best):
 
                 t0 = time.perf_counter()
 
@@ -2663,7 +2716,8 @@ def run_detection_on_image(
             )
 
             if (
-                crop_aspect >= _MAX_SPLIT_ASPECT
+                not low_effort
+                and crop_aspect >= _MAX_SPLIT_ASPECT
                 and whole_crop_weak
             ):
 
