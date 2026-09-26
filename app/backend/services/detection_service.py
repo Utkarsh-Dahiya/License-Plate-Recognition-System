@@ -13,8 +13,13 @@ HISTORY / WHY THIS FILE LOOKS THE WAY IT DOES
 The interactive OCR path uses an adaptive cascade:
 
     Tier 1: CLAHE + EasyOCR
+    Tier 4: two-band split (tall crops with weak whole-crop reads)
     Tier 2: OTSU + EasyOCR fallback
     Tier 3: denoise + OTSU + EasyOCR last resort
+
+Tiers 4 runs before 2/3: a stacked plate read as one line can produce
+long structured junk that looks "strong" and would otherwise stop the
+cascade before the band splitter ever sees it.
 
 The important optimization is to avoid running all three OCR passes
 when the first result is already sufficiently supported.
@@ -47,10 +52,15 @@ ACCURACY LAYER (format-aware candidate selection):
 IMPORTANT (multi-line plates):
     Motorcycle plates stack state code ("37-N1") over the serial
     ("4635"). Feeding that crop to the recognizer as one horizontal
-    line produces garbage or nothing. The cascade below adds a final,
-    memory-safe tier that splits such crops into horizontal text bands
-    with OpenCV projection profiles and recognizes each band with the
-    SAME recognizer-only reader — no CRAFT, no extra models.
+    line produces garbage or nothing. The cascade adds a memory-safe
+    tier that splits such crops into horizontal text bands with OpenCV
+    projection profiles and recognizes each band with the SAME
+    recognizer-only reader — no CRAFT, no extra models.
+
+    The whole-crop canvas must PRESERVE both bands: its row trim
+    collapses to the single longest text run, which for stacked plates
+    would silently turn the canvas back into a one-line image (this is
+    exactly how 37-N1/4635 used to come out UNKNOWN).
 """
 
 from __future__ import annotations
@@ -1409,7 +1419,11 @@ def _split_two_line_bands(
             cur_start = -1
             cur_len = 0
 
-    if best_start < 0:
+    # Plausibility: a real two-band plate has a WIDE ink-free gap (the
+    # plate's horizontal divider). A shallow/short quiet stretch inside a
+    # single text line (quiet rows between glyph strokes) is not a band
+    # boundary — splitting there would feed the recognizer glyph halves.
+    if best_len < max(6, int((y_hi - y_lo) * 0.06)):
         return None
 
     gap_top = y_lo + best_start
@@ -1453,17 +1467,11 @@ def _split_two_line_bands(
     ]
 
 
-def _longest_energy_run(
+def _energy_runs(
     energy: np.ndarray,
     threshold: float,
-    bridge: int = 0,
-) -> tuple[int, int] | None:
-    """Widest contiguous above-threshold run of rows/columns.
-
-    `bridge` merges runs separated by gaps up to that many cells
-    (e.g. the space in "MH 20"), while frame strokes sitting far from
-    the text stay isolated and are dropped.
-    """
+) -> list[tuple[int, int]]:
+    """All maximal contiguous above-threshold runs, in order."""
 
     above = energy > threshold
 
@@ -1480,10 +1488,24 @@ def _longest_energy_run(
     if start is not None:
         runs.append((start, len(above)))
 
-    if not runs:
-        return None
+    return runs
 
-    if bridge > 0:
+
+def _longest_energy_run(
+    energy: np.ndarray,
+    threshold: float,
+    bridge: int = 0,
+) -> tuple[int, int] | None:
+    """Widest contiguous above-threshold run of rows/columns.
+
+    `bridge` merges runs separated by gaps up to that many cells
+    (e.g. the space in "MH 20"), while frame strokes sitting far from
+    the text stay isolated and are dropped.
+    """
+
+    runs = _energy_runs(energy, threshold)
+
+    if bridge > 0 and runs:
         merged: list[tuple[int, int]] = [runs[0]]
 
         for s, e in runs[1:]:
@@ -1665,7 +1687,29 @@ def _tight_text_region(
 
     row_run = _longest_energy_run(rows, 0.25)
 
+    # Two stacked text bands (motorcycle plates): the longest
+    # above-threshold row run is then ONE band, and trimming to it would
+    # discard the other line entirely — the whole-crop canvas would look
+    # single-line (low aspect) and the multi-line tier would never fire.
+    # When a second substantial run exists, keep the FULL row span so the
+    # band splitter sees both lines. Column trimming still applies (the
+    # frame-line removal above is layout-independent).
+    multi_band = False
+
     if row_run and (row_run[1] - row_run[0]) >= h * 0.25:
+        significant_runs = [
+            run
+            for run in _energy_runs(rows, 0.25)
+            if (run[1] - run[0]) >= _MIN_BAND_ROWS
+            and (run[1] - run[0]) >= h * 0.12
+        ]
+
+        if len(significant_runs) >= 2:
+            multi_band = True
+
+    if multi_band:
+        y0, y1 = 0, h
+    elif row_run and (row_run[1] - row_run[0]) >= h * 0.25:
         y0, y1 = row_run
 
     col_run = _longest_energy_run(
@@ -2564,6 +2608,136 @@ def run_detection_on_image(
             )
 
             # =================================================
+            # TIER 4 — MULTI-LINE SPLIT (two-band plates),
+            # runs BEFORE tiers 2/3 by design:
+            #
+            # A stacked plate read as ONE line produces exactly the
+            # production failure being fixed here: the merged read can be
+            # long, structured junk (e.g. EKA181897-style strings pass the
+            # lenient legacy pattern) that looks "strong" and stops the
+            # cascade, while the real content is two short lines the
+            # whole-crop pass never resolved. The band split is cheap
+            # OpenCV geometry and at most two bounded recognizer passes,
+            # so for tall crops it runs first; tiers 2/3 then only run
+            # when the band evidence is ALSO weak, so a false split can
+            # never remove the old fallback path — it can only add
+            # candidates.
+            # =================================================
+
+            # Gate on BOTH aspects: the tightened canvas can still
+            # under-report height for stacked plates (its row profile is
+            # dominated by whichever band has more ink), so the raw YOLO
+            # crop's aspect must also be considered.
+            raw_crop_aspect = (
+                float(y2c - y1c)
+                / max(float(x2c - x1c), 1.0)
+            )
+
+            crop_aspect = max(
+                float(base_gray.shape[0])
+                / max(float(base_gray.shape[1]), 1.0),
+                raw_crop_aspect,
+            )
+
+            # A whole-crop read whose EDGE characters are not backed by
+            # the recognizer's own per-character probabilities is weak
+            # evidence too (phantom leading/trailing chars).
+            whole_crop_weak = (
+                best is None
+                or not _is_strong_enough(best)
+                or (
+                    best is not None
+                    and not _edge_supported_in(
+                        best[0],
+                        tier1_candidates,
+                    )
+                )
+            )
+
+            # On a TALL crop a strong-but-not-strict read is NOT trusted:
+            # two stacked bands merged into one line can satisfy the
+            # lenient legacy pattern (any 2-3 letters + digits), while a
+            # genuine read of a stacked plate can never be strict-valid
+            # (the motorcycle state code is numeric). This is the gate
+            # that keeps merged-garbage reads from stopping the cascade.
+            if (
+                crop_aspect >= _MAX_SPLIT_ASPECT
+                and best is not None
+                and not strict_indian_plate(best[0])
+            ):
+                whole_crop_weak = True
+
+            # NOTE: no low_effort exclusion here. A two-line plate whose
+            # whole-crop read is weak (one line only, or merged garbage)
+            # must reach the band splitter even at low YOLO confidence —
+            # the split is cheap OpenCV geometry and adds at most two
+            # bounded recognizer passes. Crops without plausible band
+            # geometry return no bands and cost nothing further.
+            if (
+                crop_aspect >= _MAX_SPLIT_ASPECT
+                and whole_crop_weak
+            ):
+
+                t0 = time.perf_counter()
+
+                bands = _split_two_line_bands(
+                    enhanced
+                )
+
+                timing.add(
+                    "Preprocess",
+                    time.perf_counter() - t0,
+                    note=f"plate{idx} multiline-split",
+                )
+
+                if bands:
+
+                    t0 = time.perf_counter()
+
+                    band_candidates = _recognize_bands(
+                        enhanced,
+                        base_gray,
+                        bands,
+                    )
+
+                    ocr_pass_count += len(bands)
+
+                    timing.add(
+                        "OCR",
+                        time.perf_counter() - t0,
+                        note=(
+                            f"plate{idx} tier4(bands="
+                            f"{len(bands)})"
+                        ),
+                    )
+
+                    _log_ocr_candidates(
+                        idx,
+                        "tier4(multiline)",
+                        band_candidates,
+                    )
+
+                    if band_candidates:
+
+                        tier_evidence.append(
+                            (
+                                4,
+                                band_candidates,
+                            )
+                        )
+
+                        t0 = time.perf_counter()
+
+                        best = _evidence_select(
+                            tier_evidence
+                        )
+
+                        timing.add(
+                            "Scoring",
+                            time.perf_counter() - t0,
+                        )
+
+            # =================================================
             # TIER 2 — OTSU FALLBACK
             # =================================================
 
@@ -2684,101 +2858,6 @@ def run_detection_on_image(
                         "Scoring",
                         time.perf_counter() - t0,
                     )
-
-            # =================================================
-            # TIER 4 — MULTI-LINE SPLIT (two-band plates)
-            # =================================================
-
-            # Only for crops that can physically hold two stacked lines
-            # (near-square or taller) and only when the whole-crop tiers
-            # did not already produce a well-supported single-line read.
-            # Typical trigger: motorcycle plates, whose two-line layout
-            # makes the whole-crop read garbage or near-empty.
-            crop_aspect = (
-                float(base_gray.shape[0])
-                / max(float(base_gray.shape[1]), 1.0)
-            )
-
-            # A whole-crop read whose EDGE characters are not backed by
-            # the recognizer's own per-character probabilities is weak
-            # evidence too (phantom leading/trailing chars): let the
-            # multi-line tier try before settling.
-            whole_crop_weak = (
-                best is None
-                or not _is_strong_enough(best)
-                or (
-                    best is not None
-                    and not _edge_supported_in(
-                        best[0],
-                        tier1_candidates,
-                    )
-                )
-            )
-
-            if (
-                not low_effort
-                and crop_aspect >= _MAX_SPLIT_ASPECT
-                and whole_crop_weak
-            ):
-
-                t0 = time.perf_counter()
-
-                bands = _split_two_line_bands(
-                    enhanced
-                )
-
-                timing.add(
-                    "Preprocess",
-                    time.perf_counter() - t0,
-                    note=f"plate{idx} multiline-split",
-                )
-
-                if bands:
-
-                    t0 = time.perf_counter()
-
-                    band_candidates = _recognize_bands(
-                        enhanced,
-                        base_gray,
-                        bands,
-                    )
-
-                    ocr_pass_count += len(bands)
-
-                    timing.add(
-                        "OCR",
-                        time.perf_counter() - t0,
-                        note=(
-                            f"plate{idx} tier4(bands="
-                            f"{len(bands)})"
-                        ),
-                    )
-
-                    _log_ocr_candidates(
-                        idx,
-                        "tier4(multiline)",
-                        band_candidates,
-                    )
-
-                    if band_candidates:
-
-                        tier_evidence.append(
-                            (
-                                4,
-                                band_candidates,
-                            )
-                        )
-
-                        t0 = time.perf_counter()
-
-                        best = _evidence_select(
-                            tier_evidence
-                        )
-
-                        timing.add(
-                            "Scoring",
-                            time.perf_counter() - t0,
-                        )
 
             # Final evidence-based selection.
             if tier_evidence:
