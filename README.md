@@ -69,7 +69,7 @@ Open `http://localhost:5173`. API default: `http://localhost:8000` (`VITE_API_BA
 
 Check `http://localhost:8000/api/health` — source files should show `"exists": true` for CSV/JSON (and weights/video if those local files are present).
 
-### Environment variables (optional)
+### Environment variables (optional, local)
 
 | Variable | Purpose |
 |---|---|
@@ -78,6 +78,38 @@ Check `http://localhost:8000/api/health` — source files should show `"exists":
 | `LVA_BATCH_CSV` / `LVA_DASHBOARD_JSON` | Batch result files |
 | `LVA_VIDEO_DETECTIONS_CSV` / `LVA_VIDEO_SUMMARY_JSON` / `LVA_ANNOTATED_VIDEO` | Video result files |
 | `VITE_API_BASE` | Frontend API origin |
+
+## Deployment (Render)
+
+Two services on one repo, both from the repo root:
+
+**Backend service** — Docker or native runtime; build command
+`pip install -r app/backend/requirements.txt`, start command
+`cd app/backend && uvicorn main:app --host 0.0.0.0 --port $PORT`.
+Weights must ship with the image or a persistent disk; the app looks for
+`runs/detect/models/license_plate_detector/weights/best.pt` under
+`LVA_PROJECT_ROOT` (override with `LVA_MODEL_PATH`).
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `LVA_FRONTEND_ORIGIN` | **Yes** | Exact frontend origin(s), comma-separated (e.g. `https://<frontend>.onrender.com`). Missing/wrong value = browser CORS failures on every call. |
+| `LVA_MODEL_PATH` | No | Override the `best.pt` lookup path if weights live elsewhere. |
+| `LVA_PROJECT_ROOT` | No | Override when the repo layout differs on the image. |
+| `LVA_DEBUG_TIMING` | No (prod: `0`) | Per-request timing/OCR-candidate logs. |
+| `LVA_BATCH_CSV`, `LVA_DASHBOARD_JSON`, `LVA_VIDEO_DETECTIONS_CSV`, `LVA_VIDEO_SUMMARY_JSON`, `LVA_ANNOTATED_VIDEO` | No | Override the saved-result file paths the dashboard reads. |
+
+**Frontend service** — static site; build command `cd app/frontend && npm ci && npm run build`,
+publish directory `app/frontend/dist`.
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `VITE_API_BASE` | **Yes** | Full backend origin, e.g. `https://license-plate-recognition-system-q6qx.onrender.com`. Baked in at BUILD time — changing it requires a rebuild/redeploy. If unset, the production bundle deliberately fails every request with an explicit configuration error instead of silently calling `localhost:8000`. |
+
+**Readiness:** `GET /api/health` (unchanged schema) reports liveness;
+`GET /api/readiness` additionally reports `status: ready / warming_up / error`
+plus the model-load error detail — useful for Render health checks and for the
+frontend warm-up notice. Models warm up in the background at startup; the first
+detection no longer pays the full load cost inline.
 
 ## Live vs saved pipelines
 

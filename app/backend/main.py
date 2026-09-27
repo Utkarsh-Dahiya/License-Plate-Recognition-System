@@ -27,10 +27,14 @@ The API reads the project's real generated data files.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 import traceback
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 from fastapi import (
@@ -44,6 +48,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from services import data_loader, history_log
 
@@ -52,9 +57,86 @@ from services import data_loader, history_log
 # APP
 # ============================================================
 
+# Model-heavy work (YOLO + OCR, one video job) runs on a DEDICATED bounded
+# executor — NOT the process-wide AnyIO pool that FastAPI/Starlette use for
+# every sync endpoint. Capping the shared pool instead (a previous attempt)
+# made /api/health, dashboard and video-status polling queue behind running
+# detections for a free worker thread, and Starlette runs sync background
+# tasks (the minutes-long video job) on that same pool, which would pin one
+# of only two workers for the job's whole duration.
+#
+# Light endpoints (health/readiness/dashboard/...) keep the uncapped default
+# pool (40 threads) and stay responsive no matter how many detections run.
+# Heavy work is bounded to DETECTION_WORKERS concurrent executions; further
+# requests simply queue inside this executor (holding only their already-
+# uploaded bytes, capped at 10 MB per request) instead of pinning threads.
+DETECTION_WORKERS = 2
+
+_detection_pool = ThreadPoolExecutor(
+    max_workers=DETECTION_WORKERS,
+    thread_name_prefix="detection",
+)
+
+
+# ============================================================
+# LIFESPAN — one-time model warmup at startup
+# ============================================================
+#
+# Models load lazily on the first detection request if warmup has not
+# finished (or failed); nothing here changes that contract. Warmup runs
+# on a worker thread so a slow load cannot block the event loop, and the
+# load lock inside detection_service guarantees exactly one YOLO / one
+# EasyOCR instance no matter who calls first.
+# ============================================================
+
+_startup_warmup_done = False
+
+
+async def _warmup_models() -> None:
+    global _startup_warmup_done
+
+    try:
+        from services.detection_service import _ensure_models_loaded
+
+        await run_in_threadpool(_ensure_models_loaded)
+
+    except Exception:
+        # Never crash the app because warmup failed (missing weights,
+        # OOM on a cold free-tier dyno). /api/readiness surfaces the
+        # load error; the next detection request retries the load via
+        # the normal lazy path.
+        traceback.print_exc()
+
+    finally:
+        _startup_warmup_done = True
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # One-time model warmup off the event loop. The load lock inside
+    # detection_service guarantees a single YOLO / EasyOCR instance even
+    # if a user request triggers the load in parallel.
+    warmup_task = asyncio.create_task(_warmup_models())
+
+    yield
+
+    # Shutdown: stop the in-flight warmup cleanly (models are process
+    # state; nothing else needs tearing down).
+    warmup_task.cancel()
+
+    try:
+        await warmup_task
+
+    except (asyncio.CancelledError, Exception):
+        pass
+
+    _detection_pool.shutdown(wait=False, cancel_futures=True)
+
+
 app = FastAPI(
     title="License Vision AI API",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 
@@ -147,6 +229,37 @@ def health():
         "status": "online",
         "models_loaded": models_ready(),
         "sources": data_loader.files_status(),
+    }
+
+
+# ============================================================
+# READINESS
+# ============================================================
+# ADDITIVE endpoint — /api/health above is unchanged.
+# ============================================================
+
+@app.get("/api/readiness")
+def readiness():
+    """Startup state for orchestration/UX: warming, ready, or failed."""
+
+    from services.detection_service import load_error, models_ready
+
+    warmup_attempted = _startup_warmup_done
+    ready = models_ready()
+    error = load_error()
+
+    if ready:
+        state = "ready"
+    elif error:
+        state = "error"
+    else:
+        state = "warming_up"
+
+    return {
+        "status": state,
+        "models_loaded": ready,
+        "warmup_attempted": warmup_attempted,
+        "detail": error,
     }
 
 
@@ -732,9 +845,19 @@ async def detect_image(
     )
 
     try:
-        result = run_detection_on_image(
+        # CPU-bound YOLO + OCR must NOT run on the event loop: an async
+        # endpoint blocks the loop for the whole inference, which is what
+        # left /api/health unresponsive (frontend "Failed to fetch" on
+        # every concurrent call) while one detection ran. Offload to the
+        # dedicated detection executor (bounded at DETECTION_WORKERS) so
+        # light endpoints on the default pool never queue behind model work.
+        loop = asyncio.get_running_loop()
+
+        result = await loop.run_in_executor(
+            _detection_pool,
+            run_detection_on_image,
             image_bytes,
-            conf_threshold=conf,
+            conf,
         )
 
     except RuntimeError as exc:
@@ -785,6 +908,16 @@ async def detect_image(
 # ============================================================
 # VIDEO PROCESSING
 # ============================================================
+
+# Registry of async video-processing jobs. Bounded: the oldest jobs are
+# dropped once the cap is hit so a client hammering /api/process/video
+# cannot grow server memory without limit. Video jobs run on the SAME
+# dedicated detection executor as image detections (one long job holds
+# one worker slot — consistent with _MAX_CONCURRENT_VIDEO_JOBS and the
+# free-tier's single model); requests beyond that get 503 instead of a
+# silent memory race.
+_MAX_VIDEO_JOBS = 12
+_MAX_CONCURRENT_VIDEO_JOBS = 1
 
 _video_jobs: dict[str, dict] = {}
 
@@ -1031,6 +1164,27 @@ async def process_video(
     tmp.write(payload)
     tmp.close()
 
+    # Drop the oldest finished jobs once the registry cap is reached
+    # (insertion order = creation order).
+    while len(_video_jobs) >= _MAX_VIDEO_JOBS:
+        for old_id in list(_video_jobs):
+            if _video_jobs[old_id].get("status") in (
+                "completed",
+                "failed",
+            ):
+                del _video_jobs[old_id]
+                break
+        else:
+            # All jobs still active (cannot happen under the concurrency
+            # cap below, but never evict a running job):
+            del _video_jobs[next(iter(_video_jobs))]
+
+    # Register FIRST, then check concurrency. "queued" counts as active:
+    # the earlier check-before-register let a second submission race past
+    # while job 1 was still queued (status not yet flipped to
+    # "processing" by its worker). This whole block contains no `await`,
+    # so the event loop serializes concurrent submissions — the counter
+    # cannot be observed stale.
     _video_jobs[job_id] = {
         "job_id": job_id,
         "status": "queued",
@@ -1041,7 +1195,34 @@ async def process_video(
         "started_at": time.time(),
     }
 
-    background_tasks.add_task(
+    active = sum(
+        1
+        for job in _video_jobs.values()
+        if job.get("status") in ("queued", "processing")
+    )
+
+    if active > _MAX_CONCURRENT_VIDEO_JOBS:
+        # Roll back: remove the just-registered job and its temp file.
+        del _video_jobs[job_id]
+        Path(tmp.name).unlink(missing_ok=True)
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "A video is already being processed. "
+                "Please wait for it to finish."
+            ),
+        )
+
+    # Video processing is heavy model work: it runs on the SAME dedicated
+    # bounded executor as image detections (one long job occupies one
+    # worker slot; the concurrency gate above keeps it to one job). The
+    # default AnyIO pool that Starlette would otherwise use stays free for
+    # health/dashboard/status endpoints for the whole duration.
+    loop = asyncio.get_running_loop()
+
+    loop.run_in_executor(
+        _detection_pool,
         _process_video_job,
         job_id,
         tmp.name,

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { UploadCloud, Loader2, RotateCcw, ShieldCheck, AlertTriangle, CircleAlert } from 'lucide-react'
 import Header from '../components/Header.jsx'
 import { Panel } from '../components/Panel.jsx'
@@ -76,6 +76,63 @@ export default function ImageAnalysis() {
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const inputRef = useRef(null)
+  const inFlightRef = useRef(false)
+  const [warmingUp, setWarmingUp] = useState(false)
+
+  // Ask the backend about model readiness on mount and poll while it is
+  // still warming up (Render Free spins instances down; the first visitor
+  // after an idle period pays the model-load cost). Purely informational:
+  // detection stays available even while models are still loading — the
+  // request simply queues until initialization finishes.
+  useEffect(() => {
+    let cancelled = false
+    let attempts = 0
+    let timer = null
+
+    async function check() {
+      try {
+        const r = await api.readiness()
+
+        if (cancelled) return
+
+        if (r.models_loaded || r.status === 'ready') {
+          setWarmingUp(false)
+          clearInterval(timer)
+          return
+        }
+
+        if (r.status === 'error') {
+          // Permanent load failure: stop polling, let the user try anyway
+          // and surface the real backend error if it persists.
+          setWarmingUp(false)
+          clearInterval(timer)
+          return
+        }
+
+        setWarmingUp(true)
+      } catch {
+        // Readiness itself unreachable — don't nag; a failed detection
+        // surfaces the connection problem with a specific message.
+        if (!cancelled) setWarmingUp(false)
+      }
+    }
+
+    check()
+    timer = setInterval(() => {
+      attempts += 1
+      if (attempts > 36) {
+        // Stop after ~90 s of polling; not worth hammering forever.
+        clearInterval(timer)
+        return
+      }
+      check()
+    }, 2500)
+
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [])
 
   function handleFile(f) {
     if (!f) return
@@ -86,8 +143,9 @@ export default function ImageAnalysis() {
   }
 
   async function runDetection() {
-    if (!file) return
+    if (!file || inFlightRef.current) return
 
+    inFlightRef.current = true
     setLoading(true)
     setError(null)
     setStepIndex(0)
@@ -100,17 +158,37 @@ export default function ImageAnalysis() {
       const res = await api.detectImage(file)
       setResult(res)
     } catch (e) {
-      if (e.status === 503) {
+      const kind = e?.kind
+      const status = e?.status
+
+      if (kind === 'timeout') {
         setError(
-          'The detection model is unavailable right now — best.pt could not be loaded on the server. Check LVA_MODEL_PATH and the System page.',
+          'The detection request timed out. On the free tier the first request after idle loads the ML models and can take a while — please try again.',
         )
-      } else if (e.status === 400) {
+      } else if (kind === 'config') {
+        setError(
+          e.message ||
+            'The frontend is misconfigured: the API address is missing. Set VITE_API_BASE and redeploy.',
+        )
+      } else if (kind === 'network') {
+        setError(
+          'Cannot reach the backend. The free tier sleeps after inactivity and may be waking up — retry in a few seconds.',
+        )
+      } else if (status === 503) {
+        setError(
+          e.message ||
+            'The backend is still loading its models. Give it a few seconds and run detection again.',
+        )
+      } else if (status === 400 || status === 413) {
         setError(e.message || 'That file could not be processed as an image.')
+      } else if (status) {
+        setError(e.message || `The backend returned an error (${status}).`)
       } else {
         setError(e.message || 'Something went wrong reaching the backend.')
       }
     } finally {
       clearInterval(stepTimer)
+      inFlightRef.current = false
       setLoading(false)
     }
   }
@@ -206,11 +284,23 @@ export default function ImageAnalysis() {
               </Panel>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {warmingUp && !result && (
+                <span className="flex items-center gap-1.5 rounded-md border border-amber-400/20 bg-amber-400/5 px-2.5 py-1 text-[10px] font-semibold tracking-wider text-amber-300">
+                  <Loader2 size={12} className="animate-spin" />
+                  AI MODELS WARMING UP — DETECTION AVAILABLE SHORTLY
+                </span>
+              )}
+
               {!result && (
                 <button
                   onClick={runDetection}
                   disabled={loading}
+                  title={
+                    warmingUp
+                      ? 'Backend models are still loading — the first run may take longer.'
+                      : undefined
+                  }
                   className="flex items-center gap-2 rounded-md bg-signal px-4 py-2 text-[13px] font-semibold text-[#062015] transition-colors hover:bg-signal/90 disabled:opacity-60"
                 >
                   {loading && (

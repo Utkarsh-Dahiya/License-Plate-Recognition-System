@@ -298,6 +298,16 @@ def models_ready() -> bool:
     )
 
 
+def load_error() -> str | None:
+    """The reason model loading failed, or None while unattempted/loading OK.
+
+    Lets /api/readiness distinguish "still warming up" from
+    "permanently failed" without reaching into module privates.
+    """
+
+    return _load_error
+
+
 # ============================================================
 # INDIAN PLATE VALIDATION
 # ============================================================
@@ -791,7 +801,14 @@ _REPAIR_UNSURE_BELOW = 0.75
 # Repaired candidates carry a small confidence discount: the swap is
 # format-driven, so they must not beat the raw read on confidence
 # alone — only on combined structure + confidence evidence.
-_REPAIR_CONF_DISCOUNT = 0.90
+#
+# 0.85 (not 0.90) keeps a two-glyph repair strictly below a STRICT-VALID
+# original at the same OCR confidence on the selection scale: repairs
+# also carry _INVALID_FORMAT_PENALTY (-12) plus their source's format
+# deficit, and the selector's agreement bonus is worth up to 14 points,
+# so 0.85 is the largest discount with margin. A repair must win on
+# structure evidence, never on raw confidence.
+_REPAIR_CONF_DISCOUNT = 0.85
 
 # Hard cap on generated repairs per plate (bounds selection cost).
 _MAX_REPAIRS = 8
@@ -864,8 +881,7 @@ def _generate_format_repairs(
             # so one ambiguous-glyph swap that lands on a strictly valid
             # registration is backed by strong format evidence even when
             # the recognizer was confident (stamped zeros read as solid
-            # 'O's). Pairs are more speculative and require the
-            # recognizer to have been unsure at BOTH positions.
+            # 'O's).
             swap_sets: list[tuple[int, ...]] = [
                 (i,) for i, _ in swap_positions
             ]
@@ -874,10 +890,31 @@ def _generate_format_repairs(
                 i for i, unsure in swap_positions if unsure
             ]
 
+            confident_only = [
+                i for i, unsure in swap_positions if not unsure
+            ]
+
+            # Pairs: the source is ALREADY format-invalid, so a two-glyph
+            # swap that lands on a strictly valid registration is backed
+            # by strong format evidence as well. A glyph the recognizer
+            # was CONFIDENT about is only rewritten when the OTHER
+            # position was unsure: one weak glyph is enough to drag a
+            # whole read off the rails, and the confident neighbor may be
+            # a legitimately-stamped ambiguous glyph (O vs 0) that merely
+            # followed it. Requiring BOTH positions to be unsure (the old
+            # rule) missed the common KLOIAP8921 case where only 'I' was
+            # uncertain. Two CONFIDENT glyphs are never both rewritten —
+            # overriding double evidence would be guesswork.
             swap_sets += [
                 (a, b)
                 for ai, a in enumerate(unsure_only)
                 for b in unsure_only[ai + 1 :]
+            ]
+
+            swap_sets += [
+                (a, b)
+                for a in unsure_only
+                for b in confident_only
             ]
 
             for swaps in swap_sets:
@@ -2379,6 +2416,9 @@ def run_detection_on_image(
             interpolation=cv2.INTER_AREA,
         )
 
+        # Rebinding `image` drops the last reference to the full-size
+        # decode; peak RSS stays near the downscaled frame instead of
+        # holding both for the whole request.
         h, w = image.shape[:2]
 
     # --------------------------------------------------------
