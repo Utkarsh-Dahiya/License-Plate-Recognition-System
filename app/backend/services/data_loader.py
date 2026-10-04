@@ -1,5 +1,5 @@
 """
-LICENSE VISION AI — Backend
+LICENSE PLATE DETECTION & OCR SYSTEM — Backend
 Data access layer.
 
 Reads the REAL existing output files from the actual project root
@@ -240,3 +240,123 @@ def files_status() -> dict:
         "model_weights": _info(MODEL_WEIGHTS_PATH),
         "annotated_video": _info(ANNOTATED_VIDEO_PATH),
     }
+
+
+# ============================================================
+# CURATED SAMPLE IMAGES
+# ============================================================
+
+BATCH_RESULTS_DIR = BATCH_CSV_PATH.parent
+
+CURATED_SAMPLES: list[dict[str, Any]] = [
+    {
+        "id": "sample-mh-sedan",
+        "title": "Maharashtra Sedan",
+        "description": "High-confidence standard current-series registration",
+        "state": "Maharashtra",
+        "state_code": "MH",
+        "expected_plate": "MH20EE7598",
+        "filename": "0014_Cars111.jpg",
+        "difficulty": "Standard",
+        "category": "private_passenger",
+    },
+    {
+        "id": "sample-hr-suv",
+        "title": "Haryana SUV",
+        "description": "Northern India registration with sharp plate contrast",
+        "state": "Haryana",
+        "state_code": "HR",
+        "expected_plate": "HR26BC55",
+        "filename": "0005_Cars101.jpg",
+        "difficulty": "Standard",
+        "category": "private_passenger",
+    },
+    {
+        "id": "sample-kl-hatchback",
+        "title": "Kerala Hatchback",
+        "description": "Southern India format with character repair candidate",
+        "state": "Kerala",
+        "state_code": "KL",
+        "expected_plate": "KL01CA2555",
+        "filename": "0001_Cars0.jpg",
+        "difficulty": "Medium",
+        "category": "private_passenger",
+    },
+    {
+        "id": "sample-dl-compact",
+        "title": "Delhi Capital Region",
+        "description": "Dense urban plate with multi-letter series code",
+        "state": "Delhi",
+        "state_code": "DL",
+        "expected_plate": "DL3CAY9324",
+        "filename": "0649_N56.jpg",
+        "difficulty": "Challenging",
+        "category": "private_passenger",
+    },
+    {
+        "id": "sample-multi-scene",
+        "title": "Multi-Vehicle Traffic",
+        "description": "Multiple plates in scene with varying scales and geometry",
+        "state": "Multi-plate",
+        "state_code": "MULTI",
+        "expected_plate": "Multiple",
+        "filename": "0006_Cars103.jpg",
+        "difficulty": "Complex",
+        "category": "multi_detection",
+    },
+    {
+        "id": "sample-commercial",
+        "title": "Commercial Transport",
+        "description": "Angled commercial vehicle plate with perspective variance",
+        "state": "Commercial",
+        "state_code": "COMM",
+        "expected_plate": "PGOMN112",
+        "filename": "0002_Cars1.jpg",
+        "difficulty": "Medium",
+        "category": "commercial",
+    },
+]
+
+
+def get_curated_samples() -> list[dict[str, Any]]:
+    """Return list of available curated sample images with existence status and URLs."""
+    results = []
+    for item in CURATED_SAMPLES:
+        file_path = BATCH_RESULTS_DIR / item["filename"]
+        exists = file_path.exists()
+        size_bytes = file_path.stat().st_size if exists else None
+        results.append({
+            "id": item["id"],
+            "title": item["title"],
+            "description": item["description"],
+            "state": item["state"],
+            "state_code": item["state_code"],
+            "expected_plate": item["expected_plate"],
+            "difficulty": item["difficulty"],
+            "category": item["category"],
+            "filename": item["filename"],
+            "image_url": f"/api/samples/{item['id']}/image",
+            "size_bytes": size_bytes,
+            "available": exists,
+        })
+    return results
+
+
+def get_sample_path(sample_id: str) -> Path | None:
+    """Return local filesystem path to a curated sample image if valid and existing."""
+    for item in CURATED_SAMPLES:
+        if item["id"] == sample_id:
+            file_path = BATCH_RESULTS_DIR / item["filename"]
+            if file_path.exists():
+                return file_path
+            return None
+    return None
+
+
+def get_sample_metadata(sample_id: str) -> dict[str, Any] | None:
+    """Return metadata for a single sample by id."""
+    for item in get_curated_samples():
+        if item["id"] == sample_id:
+            return item
+    return None
+

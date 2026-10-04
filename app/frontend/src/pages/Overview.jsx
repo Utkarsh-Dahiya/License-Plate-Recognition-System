@@ -138,7 +138,7 @@ export default function Overview() {
                 </span>
 
                 <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-signal">
-                  AI License Plate Intelligence
+                  License Plate Detection · Intelligent Plate Recognition
                 </span>
               </div>
 

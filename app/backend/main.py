@@ -1,5 +1,5 @@
 """
-LICENSE VISION AI — FastAPI backend.
+LICENSE PLATE DETECTION & OCR SYSTEM — FastAPI backend.
 
 Run locally:
     uvicorn main:app --reload --port 8000
@@ -46,7 +46,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
@@ -134,7 +134,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="License Vision AI API",
+    title="License Plate Detection & OCR System API",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -261,6 +261,46 @@ def readiness():
         "warmup_attempted": warmup_attempted,
         "detail": error,
     }
+
+
+# ============================================================
+# CURATED SAMPLES
+# ============================================================
+
+@app.get("/api/samples")
+def list_samples():
+    """List curated test sample images for 1-click evaluation."""
+    return {
+        "samples": data_loader.get_curated_samples()
+    }
+
+
+@app.get("/api/samples/{sample_id}")
+def sample_detail(sample_id: str):
+    """Retrieve metadata for a specific curated sample."""
+    sample = data_loader.get_sample_metadata(sample_id)
+    if not sample:
+        raise HTTPException(
+            status_code=404,
+            detail="Sample not found.",
+        )
+    return sample
+
+
+@app.get("/api/samples/{sample_id}/image")
+def sample_image(sample_id: str):
+    """Stream binary JPEG for a curated sample image."""
+    path = data_loader.get_sample_path(sample_id)
+    if not path or not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Sample image not found on disk.",
+        )
+    return FileResponse(
+        str(path),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 # ============================================================
@@ -782,6 +822,13 @@ def detection_history(
         None,
         pattern="^(image|video)$",
     ),
+    search: Optional[str] = Query(
+        None,
+        description=(
+            "Case-insensitive substring match on filename or "
+            "plate text."
+        ),
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(
         25,
@@ -791,8 +838,55 @@ def detection_history(
 ):
     return history_log.read_history(
         entry_type=type,
+        search=search,
         page=page,
         page_size=page_size,
+    )
+
+
+@app.get("/api/history/stats")
+def detection_history_stats():
+    """Live system statistics from ACTUALLY recorded runs only.
+
+    Computed from the append-only history log; every field is None or
+    empty when no runs have been recorded yet, so the frontend can
+    render honest zero-states. No fabricated numbers.
+    """
+    return history_log.history_stats()
+
+
+@app.get("/api/history/export")
+def detection_history_export(
+    format: str = Query(
+        "csv",
+        pattern="^(csv|json)$",
+        description="Download format: csv or json.",
+    ),
+    type: Optional[str] = Query(
+        None,
+        pattern="^(image|video)$",
+    ),
+    search: Optional[str] = Query(
+        None,
+        description="Same filter semantics as /api/history.",
+    ),
+):
+    """Download the (optionally filtered) history as CSV or JSON."""
+    content, media_type = history_log.export_entries(
+        fmt=format,
+        entry_type=type,
+        search=search,
+    )
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    filename = f"license-plate-detection-history-{stamp}.{format}"
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        },
     )
 
 
@@ -809,9 +903,17 @@ MAX_DEMO_OCR_FRAMES = 120
 async def detect_image(
     file: UploadFile = File(...),
     conf: float = Query(
-        0.25,
+        0.20,
         ge=0.05,
         le=0.95,
+    ),
+    debug: bool = Query(
+        False,
+        description=(
+            "Include debug payload (raw boxes, OCR candidates, "
+            "timings). Requires LVA_DEBUG_MODE=1 on the backend; "
+            "otherwise the flag is silently ignored."
+        ),
     ),
 ):
     if (
@@ -858,6 +960,7 @@ async def detect_image(
             run_detection_on_image,
             image_bytes,
             conf,
+            debug,
         )
 
     except RuntimeError as exc:
@@ -877,6 +980,11 @@ async def detect_image(
         key=lambda plate: plate["final_confidence"],
         default=None,
     )
+
+    # Strip debug-only artifacts before anything is logged (history is
+    # read by the frontend; debug payloads never belong there).
+    for plate in result.get("plates", []):
+        plate.pop("debug_ocr_crop_b64", None)
 
     history_log.log_entry(
         "image",
@@ -903,6 +1011,123 @@ async def detect_image(
     )
 
     return result
+
+
+# ============================================================
+# DEBUG ARTIFACTS (ADDITIVE)
+# ============================================================
+#
+# When LVA_DEBUG_MODE=1, POST /api/debug/plate-crop returns the exact
+# OCR input canvas for the best detection (the crop after box
+# expansion and OCR preprocessing). This is the image to look at when
+# OCR misreads: everything the recognizer saw is in this PNG.
+#
+# Disabled by default: in production the endpoint 404s (or 403s) and
+# stores nothing. Captures are capped and rotated; nothing is written
+# to disk. Debug payloads are also stripped from image-history logs.
+
+_DEBUG_STORE_MAX = 20
+_debug_store: dict[str, dict] = {}
+
+
+def _debug_enabled() -> bool:
+    # Mirrors detection_service.run_detection_on_image's own gate:
+    # debug payloads only flow when the deployment opted in.
+    import os
+
+    return os.environ.get("LVA_DEBUG_MODE", "0") != "0"
+
+
+@app.post("/api/debug/plate-crop")
+async def debug_plate_crop(
+    file: UploadFile = File(...),
+    conf: float = Query(0.20, ge=0.05, le=0.95),
+):
+    if not _debug_enabled():
+        raise HTTPException(
+            status_code=404,
+            detail="Debug mode is disabled (set LVA_DEBUG_MODE=1).",
+        )
+
+    if (
+        not file.content_type
+        or not file.content_type.startswith("image/")
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Please upload an image file.",
+        )
+
+    image_bytes = await file.read()
+
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="Empty file.")
+
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large.")
+
+    from services.detection_service import run_detection_on_image
+
+    loop = asyncio.get_running_loop()
+
+    result = await loop.run_in_executor(
+        _detection_pool,
+        run_detection_on_image,
+        image_bytes,
+        conf,
+        True,  # debug_mode
+    )
+
+    plates = result.get("plates") or []
+
+    best = max(
+        plates,
+        key=lambda p: p["final_confidence"],
+        default=None,
+    )
+
+    if best is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No plate detected in this image.",
+        )
+
+    crop_b64 = best.get("debug_ocr_crop_b64")
+
+    if not crop_b64:
+        raise HTTPException(
+            status_code=404,
+            detail="No OCR crop captured (debug capture unavailable).",
+        )
+
+    capture_id = uuid.uuid4().hex[:12]
+
+    _debug_store[capture_id] = {
+        "created": time.time(),
+        "filename": file.filename,
+        "ocr_text": best.get("ocr_text"),
+        "crop_b64": crop_b64,
+    }
+
+    # Rotate the store so it cannot grow without bound.
+    while len(_debug_store) > _DEBUG_STORE_MAX:
+        oldest = min(
+            _debug_store,
+            key=lambda k: _debug_store[k]["created"],
+        )
+        del _debug_store[oldest]
+
+    return {
+        "capture_id": capture_id,
+        "bbox": best["bbox"],
+        "yolo_confidence": best["yolo_confidence"],
+        "ocr_text": best.get("ocr_text"),
+        "ocr_confidence": best.get("ocr_confidence"),
+        "final_confidence": best.get("final_confidence"),
+        "status": best.get("status"),
+        "ocr_input_crop_base64": crop_b64,
+        "debug": result.get("debug"),
+    }
 
 
 # ============================================================

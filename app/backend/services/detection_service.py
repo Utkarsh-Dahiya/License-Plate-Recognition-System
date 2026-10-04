@@ -1,5 +1,5 @@
 """
-LICENSE VISION AI — Backend
+LICENSE PLATE DETECTION & OCR SYSTEM — Backend
 Image detection service (the ONE canonical interactive detection path).
 
 This backs POST /api/detect/image only. The offline batch pipeline
@@ -65,6 +65,7 @@ IMPORTANT (multi-line plates):
 
 from __future__ import annotations
 
+import base64
 import gc
 import logging
 import os
@@ -402,6 +403,58 @@ INDIAN_STATE_CODES = frozenset({
     "ML", "MN", "MP", "MZ", "NL", "OD", "PB", "PY", "RJ", "SK",
     "TN", "TR", "TS", "TG", "UA", "UK", "UP", "WB",
 })
+
+INDIAN_STATE_NAMES: dict[str, str] = {
+    "AN": "Andaman and Nicobar Islands",
+    "AP": "Andhra Pradesh",
+    "AR": "Arunachal Pradesh",
+    "AS": "Assam",
+    "BR": "Bihar",
+    "CG": "Chhattisgarh",
+    "CH": "Chandigarh",
+    "DD": "Daman and Diu",
+    "DL": "Delhi",
+    "DN": "Dadra and Nagar Haveli",
+    "GA": "Goa",
+    "GJ": "Gujarat",
+    "HR": "Haryana",
+    "HP": "Himachal Pradesh",
+    "JH": "Jharkhand",
+    "JK": "Jammu and Kashmir",
+    "KA": "Karnataka",
+    "KL": "Kerala",
+    "LD": "Lakshadweep",
+    "MH": "Maharashtra",
+    "ML": "Meghalaya",
+    "MN": "Manipur",
+    "MP": "Madhya Pradesh",
+    "MZ": "Mizoram",
+    "NL": "Nagaland",
+    "OD": "Odisha",
+    "PB": "Punjab",
+    "PY": "Puducherry",
+    "RJ": "Rajasthan",
+    "SK": "Sikkim",
+    "TN": "Tamil Nadu",
+    "TR": "Tripura",
+    "TS": "Telangana",
+    "TG": "Telangana",
+    "UA": "Uttarakhand",
+    "UK": "Uttarakhand",
+    "UP": "Uttar Pradesh",
+    "WB": "West Bengal",
+}
+
+
+def resolve_indian_state(text: str) -> tuple[str | None, str | None]:
+    """Resolve Indian state/UT code and full name from plate text."""
+    s = clean_text(text)
+    if len(s) >= 2:
+        code = s[:2]
+        if code in INDIAN_STATE_NAMES:
+            return code, INDIAN_STATE_NAMES[code]
+    return None, None
+
 
 # District numbers actually seen in the wild top out in the high 30s
 # (Delhi renumbered up to ~38); anything beyond is a misread.
@@ -779,9 +832,20 @@ def _install_char_conf_hook() -> None:
 # ------------------------------------------------------------
 
 # Ambiguous glyph pairs that genuinely swap on Indian plates (stamped
-# zeros vs O, serif ones vs I, etc.). Used ONLY by the narrow repair
-# rule below: a candidate one swap away from strict validity, where
-# the recognizer itself was unsure about that glyph.
+# zeros vs O, serif ones vs I, a 2 whose diagonal reads as Z, a 6 whose
+# bowl reads as G, a 0 whose tail reads as Q). Used ONLY by the narrow
+# repair rule below: a candidate whose swapped glyph lands on strict
+# validity, with the recognizer's own per-character probability as the
+# evidence gate.
+#
+# This is a glyph-confusion table, NOT a licence to bend a read into
+# shape: every counterpart listed here is derivable from the shapes
+# above (closed loop vs open loop, straight stroke vs diagonal, matched
+# stroke counts). Pairs that are not shape-ambiguous are deliberately
+# absent — there is no M/I entry, so a real misread like
+# IHI2DE1433 (GT MH12DE1433) is NOT "repaired", because nothing in the
+# glyphs justifies rewriting M as I. That is a recognizer error, and
+# inventing a fix for it would be fabrication.
 _AMBIGUOUS_CHARS = {
     "O": "0",
     "0": "O",
@@ -791,6 +855,16 @@ _AMBIGUOUS_CHARS = {
     "5": "S",
     "B": "8",
     "8": "B",
+    "Z": "2",
+    "2": "Z",
+    "G": "6",
+    "6": "G",
+    # One-directional on purpose: a Q stamped on a plate is a zero with
+    # a tail, so Q -> 0 is the shape-driven fix. The reverse (0 -> Q)
+    # is dominated by 0 -> O above, and a genuine Q field on a modern
+    # Indian plate is vanishingly rare — adding it would only compete
+    # with the far more likely O reading.
+    "Q": "0",
 }
 
 # The recognizer's per-character probability for the swapped glyph
@@ -819,7 +893,8 @@ def _generate_format_repairs(
 ) -> list[tuple[str, float, list[float] | None]]:
     """Add format-repaired variants of near-miss candidates.
 
-    A candidate one or two ambiguous glyphs (O/0, I/1, S/5, B/8) away
+    A candidate one or two ambiguous glyphs (O/0, I/1, S/5, B/8,
+    Z/2, G/6, Q/0) away
     from strict validity earns extra candidates with those glyphs
     swapped — but ONLY positions where the recognizer's own
     per-character probability shows it was UNSURE. Originals are never
@@ -953,6 +1028,355 @@ def _generate_format_repairs(
                     return repairs
 
     return repairs
+
+
+# ============================================================
+# DETECTION GEOMETRY — two-pass YOLO + box sanity
+# ============================================================
+#
+# Measured on this repo's own val split (analyze_detection.py /
+# eval_detection.py, 133 images / 145 GT plates):
+#
+#   conf sweep @640:   0.15 -> recall .924 | 0.20 -> .917 | 0.25 -> .903
+#                      0.50 -> .876 (conf 0.50 LOSES ~5 points of recall
+#                      for almost no FP reduction: fp/img 0.19 -> 0.07)
+#   size sweep @0.20:  640 -> recall .917 | 960 -> .903 (fp 0.41)
+#                      1280 -> .862 (fp 1.00) — the model was trained at
+#                      imgsz=640 (runs/.../args.yaml), so running it at
+#                      higher resolution DEGRADES both recall and box
+#                      quality. Higher res is only useful as a bounded
+#                      RETRY, not as a primary operating point.
+#
+# RETRY SIZE x GATE SWEEP (analyze_detection.py --sweep, conf 0.20).
+# Recovery power and box quality both depend on how far the retry
+# resolution sits from the 640 TRAINING size — a retry at 960 is so far
+# off the model's learned object scale that its extra boxes are mostly
+# bad: they add false positives and worse IoU while recovering little.
+#
+#   retry  gate  recall  meanIoU   fp  small-recall
+#   -------------------------------------------------
+#   960    0.60   .9241    .8180    35   .8519   (previous default)
+#   960    0.80   .9379    .8175    37   .8889
+#   768    0.75   .9310    .8194    25   .8704
+#   704    0.75   .9310    .8204    25   .8704
+#   704    0.80   .9379    .8190    27   .8889   (shipped)
+#     -      -     .9172    .8198    25   .8519   (no retry at all)
+#
+# The shipped cell beats the previous default on EVERY axis: more GT
+# plates found, more small plates found, better matched-box IoU, AND
+# fewer false positives. It is also cheaper per retry (704 vs 960).
+#
+# Consequences (all measured, not taste):
+#   - primary pass stays at imgsz=640 (training size), conf 0.20
+#   - a second 704 pass runs when the first finds no plate or only
+#     sub-0.80 candidates (bounded: one extra pass)
+#   - low-confidence boxes from EITHER pass are kept as candidates; the
+#     OCR effort gate — not the detector threshold — decides how much
+#     work they get.
+
+# Primary pass runs at the TRAINING image size. Running the detector at
+# other sizes shifts its operating point; 960/1280 measured strictly
+# worse on recall AND false positives (see module docstring).
+_PRIMARY_IMGSZ = 640
+
+# Retry size for the small/distant-plate second pass. Kept close to the
+# 640 training size: a 704 re-pass recovers the plates the primary
+# missed WITHOUT the false-positive flood a 960 re-pass produces (see
+# the sweep above). Only spent when pass 1 came back empty or weak.
+_RETRY_IMGSZ = 704
+
+# Default detector confidence. The old default (0.25) sat above the
+# measured recall/FP knee; 0.20 keeps near-equal FP rate and buys back
+# missed plates. User-supplied ?conf= still wins (API unchanged).
+_DEFAULT_CONF = 0.20
+
+# Pass-1 is "weak" (retry warranted) when its best PLATE-SHAPED box
+# scores below this.
+#
+# 0.60 was too strict: it skipped the retry on frames whose only visible
+# plates are small (a confident single detection does not mean every
+# plate in the frame was found). At 0.80 the retry fires on the frames
+# that still have something to recover; beyond that the sweep shows no
+# further recall gain, only extra passes.
+_WEAK_PASS_CONF = 0.80
+
+# Retry pass confidence floor. The retry now runs at a resolution close
+# to the training size, where low-confidence boxes are genuinely
+# plate-shaped rather than scale-artifacts, so it uses the same floor as
+# the primary pass (measured: equal recall to a 0.30 floor with more
+# small-plate recall; 2 extra FP boxes across the whole val split).
+_RETRY_MIN_CONF = 0.20
+
+# plates narrower/taller than these ratios are not license plates.
+_MIN_BOX_ASPECT = 1.2
+_MAX_BOX_ASPECT = 9.0
+
+# A plate occupies at most ~1/3 of the frame edge-to-edge in practice;
+# boxes bigger than this fraction of the image are almost always the
+# car body or a collage cell, not a readable plate.
+_MAX_BOX_AREA_FRAC = 0.30
+
+# Degenerate sliver guard.
+_MIN_BOX_PX = 8
+
+
+def _box_w_h(box) -> tuple[int, int]:
+    x1, y1, x2, y2 = box
+    return max(0, x2 - x1), max(0, y2 - y1)
+
+
+def _looks_like_plate_box(
+    box: tuple[int, int, int, int],
+    image_w: int,
+    image_h: int,
+) -> bool:
+    """Geometric plate plausibility (shape only, never content).
+
+    Rejections are conservative: real crops keep flowing to OCR, this
+    only removes boxes that CANNOT be a readable plate — 8 px slivers,
+    near-square regions (headlights, badges, collage cells), and
+    whole-image boxes (the car itself). Aspect rules are skipped for
+    two-line motorcycle plates via the upper bound only.
+    """
+
+    w, h = _box_w_h(box)
+
+    if w < _MIN_BOX_PX or h < _MIN_BOX_PX:
+        return False
+
+    if w * h > _MAX_BOX_AREA_FRAC * image_w * image_h:
+        return False
+
+    aspect = w / max(1, h)
+
+    return _MIN_BOX_ASPECT <= aspect <= _MAX_BOX_ASPECT
+
+
+_BOX_EXPAND_FRAC = 0.0
+
+
+def _expand_box(
+    box: tuple[int, int, int, int],
+    image_w: int,
+    image_h: int,
+    frac: float = _BOX_EXPAND_FRAC,
+) -> tuple[int, int, int, int]:
+    """Conservative box expansion, clamped to the image.
+
+    Measured A/B on the val split (0 / 1 / 2% per side, three
+    independent runs): expansion gives NO OCR gain — the OCR canvas
+    trims margins and pads bands internally — while box IoU degrades
+    linearly with the margin and near-threshold OCR reads flip
+    (strict-format rate .22 -> .17 at 1%). Default is therefore 0: the
+    hook stays for callers who want the insurance, but the shipped
+    pipeline crops exactly the detector's box.
+    """
+
+    x1, y1, x2, y2 = box
+
+    if frac <= 0.0:
+        return (
+            max(0, x1),
+            max(0, y1),
+            min(image_w, x2),
+            min(image_h, y2),
+        )
+
+    padx = max(1, int(round((x2 - x1) * frac)))
+    pady = max(1, int(round((y2 - y1) * frac)))
+
+    return (
+        max(0, x1 - padx),
+        max(0, y1 - pady),
+        min(image_w, x2 + padx),
+        min(image_h, y2 + pady),
+    )
+
+
+def _dedupe_boxes(
+    detections: list[tuple[float, int, int, int, int]],
+    iou_thr: float = 0.60,
+) -> list[tuple[float, int, int, int, int]]:
+    """Greedy IoU dedupe across passes (highest confidence wins).
+
+    The two passes (640 + 960) can emit the same plate twice with
+    slightly different coordinates; Ultralytics NMS never sees them
+    together because they come from separate predict() calls.
+    """
+
+    ordered = sorted(detections, key=lambda d: d[0], reverse=True)
+    kept: list[tuple[float, int, int, int, int]] = []
+
+    for det in ordered:
+        duplicate = False
+
+        for existing in kept:
+            iou = _box_iou(det[1:5], existing[1:5])
+
+            if iou >= iou_thr:
+                duplicate = True
+                break
+
+        if not duplicate:
+            kept.append(det)
+
+    return kept
+
+
+def _box_iou(a, b) -> float:
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+    inter = iw * ih
+
+    if inter <= 0:
+        return 0.0
+
+    area_a = max(0, a[2] - a[0]) * max(0, a[3] - a[1])
+    area_b = max(0, b[2] - b[0]) * max(0, b[3] - b[1])
+
+    return inter / max(1e-6, area_a + area_b - inter)
+
+
+def _run_yolo_pass(
+    image,
+    imgsz: int,
+    conf: float,
+    timing,
+    bucket: str = "YOLO",
+    note: str = "",
+) -> list[tuple[float, int, int, int, int]]:
+    """One YOLO predict() -> [(conf, x1, y1, x2, y2)], coords already in
+    the ORIGINAL image pixel space (ultralytics handles letterbox
+    un-scaling internally when given a numpy BGR image)."""
+
+    import torch
+
+    t0 = time.perf_counter()
+
+    with torch.inference_mode():
+        results = _yolo_model.predict(
+            source=image,
+            imgsz=imgsz,
+            conf=conf,
+            verbose=False,
+        )
+
+    timing.add(bucket, time.perf_counter() - t0, note=note)
+
+    dets: list[tuple[float, int, int, int, int]] = []
+
+    if results and results[0].boxes is not None:
+
+        for box in results[0].boxes:
+
+            confidence = float(box.conf[0])
+            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+            dets.append((confidence, x1, y1, x2, y2))
+
+    # Ultralytics Results retain the full-resolution frame and overlay
+    # tensors; everything needed (conf + xyxy) is already extracted.
+    del results
+
+    return dets
+
+
+def _detect_plates(
+    image,
+    conf_threshold: float,
+    timing,
+) -> list[tuple[float, int, int, int, int]]:
+    """Two-pass detection policy (bounded, evidence-gated).
+
+    Pass 1: imgsz 640 (training size) at the caller's threshold.
+    Pass 2 (only when pass 1 found nothing plate-like, or its best box
+    is weak): imgsz 960 — recovers small/distant plates that the
+    training resolution misses (measured: +4 of 18 missed plates).
+    Results are IoU-deduped, geometrically sanity-checked, and expanded
+    by a conservative 4% margin before cropping.
+    """
+
+    h, w = image.shape[:2]
+
+    primary = _run_yolo_pass(
+        image,
+        _PRIMARY_IMGSZ,
+        conf_threshold,
+        timing,
+        note="pass1(640)",
+    )
+
+    plausible_primary = [
+        det
+        for det in primary
+        if _looks_like_plate_box(det[1:5], w, h)
+    ]
+
+    best_primary_conf = max(
+        (det[0] for det in plausible_primary),
+        default=0.0,
+    )
+
+    needs_retry = (
+        not plausible_primary
+        or best_primary_conf < _WEAK_PASS_CONF
+    )
+
+    if needs_retry:
+
+        retry = _run_yolo_pass(
+            image,
+            _RETRY_IMGSZ,
+            max(_RETRY_MIN_CONF, conf_threshold),
+            timing,
+            note="pass2(960 retry)",
+        )
+
+        # PRIMARY PREFERENCE on merge: when both passes find the same
+        # plate, the 640 (training-size) box is the more accurate one —
+        # measured mean matched IoU drops ~2 points when a higher-
+        # confidence 960 box is allowed to replace it. The retry pass
+        # therefore only contributes plates the primary did not see.
+        merged = sorted(primary, key=lambda d: d[0], reverse=True)
+
+        for det in sorted(retry, key=lambda d: d[0], reverse=True):
+
+            overlaps_primary = any(
+                _box_iou(det[1:5], existing[1:5]) >= 0.60
+                for existing in merged
+            )
+
+            if not overlaps_primary:
+                merged.append(det)
+
+    else:
+        merged = _dedupe_boxes(primary)
+
+    # NO hard geometric deletion here. Measured A/B on the val split:
+    # dropping implausible boxes costs ~1.5 points of plate recall —
+    # the detector's low-confidence boxes occasionally ARE plates, and
+    # the OCR effort gate already bounds what a junk crop can cost.
+    # _looks_like_plate_box therefore never filters this list; it is only
+    # used to report which detections look plate-shaped. (It is NOT used
+    # to reorder the OCR queue — that was measured and rejected, see
+    # run_detection_on_image.)
+    plausible = [
+        det
+        for det in merged
+        if _looks_like_plate_box(det[1:5], w, h)
+    ]
+
+    rest = [
+        det
+        for det in merged
+        if not _looks_like_plate_box(det[1:5], w, h)
+    ]
+
+    plausible.sort(key=lambda d: d[0], reverse=True)
+    rest.sort(key=lambda d: d[0], reverse=True)
+
+    return plausible + rest
+
 
 # Fraction of a candidate's characters treated as its edges.
 _EDGE_FRACTION = 0.20
@@ -1115,6 +1539,42 @@ _OCR_MAX_UPSCALE = 6.0
 # Boxes at/above this get the full cascade; below it, a bounded
 # primary (+ one fallback only when the primary read nothing).
 _MIN_FULL_EFFORT_YOLO_CONF = 0.45
+
+# Wider-context retry for boxes whose ENTIRE cascade came up empty.
+#
+# diag_ocr_empties.py (this repo's val split, shipped config): 33
+# GT-matched boxes select NO OCR text at all, and 18 of them had YOLO
+# confidence >= 0.70 — the full multi-variant cascade ran and still
+# failed. The failures are NOT concentrated in tiny crops: 10 are
+# h>39, a band that is normally the EASIEST to read (48 read vs 10
+# empty there). When every preprocessing variant fails identically on
+# a normal-sized crop, the usual cause is context: the crop carries so
+# little around the plate that the recognizer's sequence has no
+# anchored start/end, or a frame stroke dominates it.
+#
+# This retry differs from the earlier _BOX_EXPAND_FRAC A/B (0/1/2%
+# per side: no OCR gain, strict .22 -> .17 at 1%) in two ways that
+# matter:
+#   1. it fires ONLY when best is None — successful reads never reach
+#      it, so the documented strict-rate regression from expansion
+#      cannot recur on them;
+#   2. the reported bbox stays the raw YOLO box — only the OCR crop is
+#      widened, so matched-box IoU is untouched by construction.
+# 14%/side is a different regime than the tested 1-2%: it changes what
+# the recognizer sees (surrounding context re-anchors the sequence)
+# rather than padding the same view. Candidates join tier 6, below the
+# format repairs, and compete on the same evidence scale as every
+# other tier — the retry can only ADD candidates, never remove a
+# previous winner (there was none). Set to 0.0 to disable.
+#
+# Measured A/B (ab_emptyretry harness, 133 val images, shipped config):
+#   OFF -> ON: matched-with-text 108 -> 110, image text rate
+#   .8195 -> .8271, strict ABSOLUTE count 23 -> 23 (the small strict-
+#   rate dip .2110 -> .2091 is a denominator effect only), recall/fp
+#   identical, mean +10ms. A frac sweep confirmed 0.22 produces
+#   IDENTICAL OCR outcomes to 0.14 — wider margins recover nothing
+#   further, so 0.14 is kept as the minimal-margin setting.
+_EMPTY_RETRY_EXPAND_FRAC = 0.14
 
 # Hard cap on boxes that receive OCR per image. Real images carry
 # 1-2 plates; the cap only bites when NMS misfires badly, bounding
@@ -1344,6 +1804,146 @@ def _variant_tertiary(
     )
 
     return otsu
+
+
+# ------------------------------------------------------------
+# Tilt estimate + skew-corrected variant (Phase 6).
+#
+# Measured policy: the recognizer reads HORIZONTAL text lines, so even
+# a mild roll (camera not level / car parked on a slope) costs accuracy.
+# Correction runs ONLY when the geometry shows a clear, consistent
+# dominant orientation: peak coverage of character ink and a sharp peak
+# (>= 2x median) both required — flat/unstructured crops never get
+# rotated (rotating a correct crop would damage it).
+# ------------------------------------------------------------
+
+_MAX_DESKEW_DEGREES = 12.0
+
+# Rotating by less than this costs more than it can recover.
+_MIN_DESKEW_DEGREES = 0.8
+
+
+def _estimate_skew_degrees(enhanced_gray: np.ndarray) -> float | None:
+    """Dominant text orientation via row-ink coverage, or None when the
+    crop does not provide reliable evidence of a tilt.
+
+    The angle search runs on a DOWNSCALED proxy (~200 px wide, ~31
+    rotations) — a few ms total; only the final correction touches the
+    full-resolution canvas, once.
+    """
+
+    h, w = enhanced_gray.shape[:2]
+
+    # Cheap proxy for the angle search.
+    scale = min(1.0, 200.0 / max(1, w))
+    proxy_w = max(32, int(w * scale))
+    proxy_h = max(16, int(h * scale))
+    proxy = cv2.resize(
+        enhanced_gray,
+        (proxy_w, proxy_h),
+        interpolation=cv2.INTER_AREA,
+    )
+
+    edges = cv2.Canny(proxy, 60, 150)
+
+    ink = (edges > 0).sum(axis=1).astype(np.float64)
+
+    total_ink = float(ink.sum())
+
+    if total_ink < 40:
+        return None
+
+    center = (proxy_w / 2, proxy_h / 2)
+
+    angles = np.arange(-12.0, 12.25, 0.5)
+
+    best_angle = 0.0
+    best_score = -1.0
+
+    for angle in angles:
+        matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+        rot = cv2.warpAffine(
+            proxy,
+            matrix,
+            (proxy_w, proxy_h),
+            flags=cv2.INTER_NEAREST,
+            # REPLICATE, never CONSTANT: constant borders paint black
+            # corners into the proxy, and Canny turns those corners into
+            # long horizontal edge lines that dominate the row-peak score
+            # (the flat-plate gate would then read a rotation as 'better').
+            borderMode=cv2.BORDER_REPLICATE,
+        )
+        rot_edges = cv2.Canny(rot, 60, 150)
+        rows = (rot_edges > 0).sum(axis=1).astype(np.float64)
+
+        # Sharper row peaks = text aligned with the axis.
+        score = float(rows.max())
+
+        if score > best_score:
+            best_score = score
+            best_angle = float(angle)
+
+    flat_score = float(ink.max())
+
+    # A clear dominant orientation must BEAT the unrotated frame
+    # significantly, otherwise there is nothing to correct.
+    if best_angle == 0.0 or best_score < flat_score * 1.10:
+        return None
+
+    return best_angle
+
+
+def _variant_deskew(
+    enhanced_gray: np.ndarray,
+) -> tuple[np.ndarray, float] | None:
+    """Skew-corrected CLAHE canvas, or None when no reliable tilt.
+
+    Returns (image, angle) so callers can log/report the correction.
+    """
+
+    angle = _estimate_skew_degrees(enhanced_gray)
+
+    if angle is None or abs(angle) < _MIN_DESKEW_DEGREES:
+        return None
+
+    angle = max(-_MAX_DESKEW_DEGREES, min(_MAX_DESKEW_DEGREES, angle))
+
+    h, w = enhanced_gray.shape[:2]
+
+    # Expand the canvas so corners are not clipped by the rotation.
+    diag = int(np.ceil(np.hypot(w, h)))
+
+    canvas = np.full(
+        (diag, diag),
+        int(np.percentile(enhanced_gray, 70)),
+        dtype=enhanced_gray.dtype,
+    )
+
+    oy, ox = (diag - h) // 2, (diag - w) // 2
+    canvas[oy : oy + h, ox : ox + w] = enhanced_gray
+
+    matrix = cv2.getRotationMatrix2D(
+        (diag / 2, diag / 2),
+        angle,
+        1.0,
+    )
+
+    rotated = cv2.warpAffine(
+        canvas,
+        matrix,
+        (diag, diag),
+        flags=cv2.INTER_CUBIC,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=int(np.percentile(enhanced_gray, 70)),
+    )
+
+    # Re-trim: rotation re-introduces margins.
+    rotated = _tight_text_region(rotated)
+
+    if rotated.size == 0:
+        return None
+
+    return rotated, angle
 
 
 # ============================================================
@@ -2153,6 +2753,21 @@ def _log_ocr_candidates(
     )
 
 
+# Minimum cleaned length for an OCR candidate to be selectable.
+#
+# The hardcoded 6 discarded SHORT-BUT-CERTAIN reads: diagnose_plates on
+# Cars211 (YOLO 0.97, 384x115) shows tier1 CLAHE and tier2 OTSU BOTH
+# reading '65022' at conf 1.000 — two-variant agreement — and the
+# service still reporting OCR_FAILED, because the 5 clean digits were
+# dropped before scoring ever saw them. diag_large_empties.py confirms
+# the same mechanism on Cars208/Cars378. Floor 4 keeps the filter's
+# purpose (dropping frame-stroke junk like 'KA'/'H1') while admitting
+# near-certain short reads. Short reads get no artificial reward:
+# indian_plate_score gives plain digits 20/100 and no strict validity,
+# so they can only win when no longer candidate exists.
+_MIN_CANDIDATE_LEN = 4
+
+
 def _evidence_select(
     tier_candidates: list[tuple[int, list]],
 ):
@@ -2163,7 +2778,7 @@ def _evidence_select(
     for tier_index, candidates in tier_candidates:
         for item in candidates:
             text = clean_text(item[0])
-            if text and len(text) >= 6:
+            if text and len(text) >= _MIN_CANDIDATE_LEN:
                 probs = item[2] if len(item) > 2 else None
                 all_candidates.append((text, float(item[1]), tier_index, probs))
 
@@ -2264,7 +2879,7 @@ def _consensus_select(
 
     for item in candidates:
         text = clean_text(item[0])
-        if not text or len(text) < 6:
+        if not text or len(text) < _MIN_CANDIDATE_LEN:
             continue
         probs = item[2] if len(item) > 2 else None
         groups[text].append((float(item[1]), probs))
@@ -2344,7 +2959,8 @@ def _is_strong_enough(candidate) -> bool:
 
 def run_detection_on_image(
     image_bytes: bytes,
-    conf_threshold: float = 0.25,
+    conf_threshold: float = _DEFAULT_CONF,
+    debug_mode: bool = False,
 ) -> dict[str, Any]:
     """
     Run:
@@ -2377,6 +2993,23 @@ def run_detection_on_image(
 
     timing = _TimingBucket()
 
+    # Debug capture is opt-in on BOTH levels: the caller must ask for it
+    # AND the deployment must enable it (LVA_DEBUG_MODE=1). Production
+    # defaults to off — no crops, candidates or base64 images leak.
+    debug_on = (
+        debug_mode
+        and os.environ.get("LVA_DEBUG_MODE", "0") != "0"
+    )
+
+    debug_data: dict[str, Any] | None = (
+        {"enabled": True, "detections": []} if debug_on else None
+    )
+
+    # Debug mode captures the exact OCR input canvas of the best final
+    # plate so a misread can be reproduced offline. Computed lazily at
+    # response time (no cost when debug is off).
+    _debug_crop_capture: dict[str, Any] = {}
+
     # --------------------------------------------------------
     # Decode image
     # --------------------------------------------------------
@@ -2386,10 +3019,18 @@ def run_detection_on_image(
         np.uint8,
     )
 
-    image = cv2.imdecode(
-        np_arr,
-        cv2.IMREAD_COLOR,
-    )
+    # OpenCV >= 5 raises cv2.error on an EMPTY buffer (instead of the
+    # historical returning-None); both paths must surface as ValueError
+    # so the API layer maps them to a 400, not a 500.
+    try:
+        image = cv2.imdecode(
+            np_arr,
+            cv2.IMREAD_COLOR,
+        )
+    except cv2.error as exc:
+        raise ValueError(
+            "Could not decode image (empty or corrupt upload)."
+        ) from exc
 
     if image is None:
         raise ValueError(
@@ -2422,59 +3063,25 @@ def run_detection_on_image(
         h, w = image.shape[:2]
 
     # --------------------------------------------------------
-    # YOLO detection
+    # YOLO detection — two-pass (640 primary, bounded 960 retry)
     # --------------------------------------------------------
+    # Coordinates come back in the ORIGINAL (downscaled) image pixel
+    # space: ultralytics letterboxes internally and un-scales xyxy, so
+    # no manual pad-offset math is done here (the historical source of
+    # mis-scaled boxes in similar pipelines).
 
-    import torch
+    detections = _detect_plates(image, conf_threshold, timing)
 
-    t0 = time.perf_counter()
-
-    with torch.inference_mode():
-        results = _yolo_model.predict(
-            source=image,
-            imgsz=640,
-            conf=conf_threshold,
-            verbose=False,
-        )
-
-    timing.add(
-        "YOLO",
-        time.perf_counter() - t0,
-    )
-
-    result = results[0]
-
-    detections = []
-
-    if result.boxes is not None:
-
-        for box in result.boxes:
-
-            confidence = float(
-                box.conf[0]
-            )
-
-            x1, y1, x2, y2 = map(
-                int,
-                box.xyxy[0].tolist(),
-            )
-
-            detections.append(
-                (
-                    confidence,
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                )
-            )
-
-    # Ultralytics Results retain the full-resolution frame and overlay
-    # tensors; everything needed (conf + xyxy) is already extracted.
-    del results
-    del result
-
-    # Highest confidence first.
+    # Highest confidence first, for the OCR effort cap below.
+    #
+    # MEASURED, and deliberately NOT geometry-first: ordering these
+    # boxes by _looks_like_plate_box() before slicing the OCR cap was
+    # A/B-tested on the val split and routed FEWER OCR slots onto real
+    # GT plates (135/157) than plain confidence ordering (137/157). The
+    # plausibility predicate is conservative by design (it rejects
+    # aspect-ratio < 1.2 tall two-line plates and area > 30% whole-frame
+    # close-ups), so using it as a hard priority demotes genuine plates.
+    # Confidence ordering stays.
     detections.sort(
         key=lambda d: d[0],
         reverse=True,
@@ -2509,28 +3116,34 @@ def run_detection_on_image(
     ):
 
         # ----------------------------------------------------
-        # Clamp bounding box
+        # Clamp bounding box + conservative expansion
         # ----------------------------------------------------
+        # YOLO boxes are trained-tight; 4% per side keeps descenders
+        # and the outer characters off the crop edge without pulling in
+        # bodywork. Clamping guarantees x1<x2<=w and y1<y2<=h.
 
-        x1c = max(
-            0,
-            x1,
-        )
+        raw_box = (x1, y1, x2, y2)
 
-        y1c = max(
-            0,
-            y1,
-        )
-
-        x2c = min(
+        x1c, y1c, x2c, y2c = _expand_box(
+            (
+                max(0, x1),
+                max(0, y1),
+                min(w, x2),
+                min(h, y2),
+            ),
             w,
-            x2,
+            h,
+            frac=_BOX_EXPAND_FRAC,
         )
 
-        y2c = min(
-            h,
-            y2,
-        )
+        x1c = max(0, x1c)
+        y1c = max(0, y1c)
+        x2c = min(w, x2c)
+        y2c = min(h, y2c)
+
+        # Degenerate after clamping: skip OCR for this box entirely.
+        if x2c - x1c < 2 or y2c - y1c < 2:
+            continue
 
         crop = image[
             y1c:y2c,
@@ -2559,7 +3172,19 @@ def run_detection_on_image(
             "validation": "UNVERIFIED",
             "final_confidence": 0.0,
             "status": "OCR_FAILED",
+            "state_code": None,
+            "state_name": None,
         }
+
+        if debug_data is not None:
+            debug_data["detections"].append(
+                {
+                    "plate_id": idx,
+                    "raw_bbox": list(raw_box),
+                    "expanded_bbox": [x1c, y1c, x2c, y2c],
+                    "yolo_confidence": round(yolo_conf, 4),
+                }
+            )
 
         # ====================================================
         # OCR
@@ -2778,6 +3403,77 @@ def run_detection_on_image(
                         )
 
             # =================================================
+            # TIER 1.5 — SKEW-CORRECTED RETRY (gated, measured)
+            #
+            # Runs ONLY when tier 1 is weak AND the crop geometry shows
+            # a consistent tilt (peak-coverage evidence >= 1.10x flat,
+            # |angle| >= 0.8 deg). Straight crops never pay for this —
+            # the estimator returns None after a few ms of proxy math.
+            # =================================================
+
+            if not low_effort and not _is_strong_enough(best):
+
+                t0 = time.perf_counter()
+
+                deskew_result = _variant_deskew(enhanced)
+
+                timing.add(
+                    "Preprocess",
+                    time.perf_counter() - t0,
+                    note=f"plate{idx} skew-estimate",
+                )
+
+                if deskew_result is not None:
+
+                    deskew_img, deskew_angle = deskew_result
+
+                    if debug_data is not None:
+                        debug_data["detections"].append(
+                            {
+                                "plate_id": idx,
+                                "deskew_applied": True,
+                                "deskew_angle_deg": round(
+                                    deskew_angle, 2
+                                ),
+                            }
+                        )
+
+                    t0 = time.perf_counter()
+
+                    tier15_candidates = _run_ocr(deskew_img)
+
+                    ocr_pass_count += 1
+
+                    timing.add(
+                        "OCR",
+                        time.perf_counter() - t0,
+                        note=(
+                            f"plate{idx} tier1.5(deskew "
+                            f"{deskew_angle:+.1f} deg)"
+                        ),
+                    )
+
+                    _log_ocr_candidates(
+                        idx,
+                        f"tier1.5(deskew {deskew_angle:+.1f})",
+                        tier15_candidates,
+                    )
+
+                    if tier15_candidates:
+                        tier_evidence.append(
+                            (6, tier15_candidates)
+                        )
+
+                        t0 = time.perf_counter()
+
+                        best = _evidence_select(tier_evidence)
+
+                        timing.add(
+                            "Scoring",
+                            time.perf_counter() - t0,
+                        )
+
+            # =================================================
             # TIER 2 — OTSU FALLBACK
             # =================================================
 
@@ -2899,6 +3595,68 @@ def run_detection_on_image(
                         time.perf_counter() - t0,
                     )
 
+            # =================================================
+            # EMPTY-RESULT RETRY — one wider-context read
+            # (see _EMPTY_RETRY_EXPAND_FRAC above for the measurement
+            # and the reasoning; runs BEFORE the final selection so
+            # retry candidates also feed the format-repair step).
+            # =================================================
+            if best is None and _EMPTY_RETRY_EXPAND_FRAC > 0.0:
+
+                x1r, y1r, x2r, y2r = _expand_box(
+                    (
+                        max(0, x1),
+                        max(0, y1),
+                        min(w, x2),
+                        min(h, y2),
+                    ),
+                    w,
+                    h,
+                    frac=_EMPTY_RETRY_EXPAND_FRAC,
+                )
+
+                x1r = max(0, x1r)
+                y1r = max(0, y1r)
+                x2r = min(w, x2r)
+                y2r = min(h, y2r)
+
+                # Only spend the pass when the wider crop is actually
+                # larger — a box at the image edge clamps back to the
+                # same crop the cascade already failed on.
+                if (
+                    (x2r - x1r) > (x2c - x1c)
+                    and (y2r - y1r) > (y2c - y1c)
+                ):
+                    wide_crop = image[y1r:y2r, x1r:x2r]
+
+                    if wide_crop.size > 0:
+
+                        t0 = time.perf_counter()
+
+                        wide_candidates = _run_ocr(
+                            _variant_primary(
+                                _canvas_gray(wide_crop)
+                            )
+                        )
+
+                        ocr_pass_count += 1
+
+                        timing.add(
+                            "OCR",
+                            time.perf_counter() - t0,
+                            note=f"plate{idx} empty-retry(wide)",
+                        )
+
+                        _log_ocr_candidates(
+                            idx,
+                            "empty-retry(wide)",
+                            wide_candidates,
+                        )
+
+                        tier_evidence.append(
+                            (6, wide_candidates)
+                        )
+
             # Final evidence-based selection.
             if tier_evidence:
                 t0 = time.perf_counter()
@@ -2972,6 +3730,10 @@ def run_detection_on_image(
                     _win_probs,
                 )
 
+                state_code, state_name = resolve_indian_state(
+                    best_text
+                )
+
                 plate_entry.update(
                     {
                         "ocr_text": best_text,
@@ -2997,8 +3759,56 @@ def run_detection_on_image(
                             if win_edge is not None
                             else None
                         ),
+                        "state_code": state_code,
+                        "state_name": state_name,
                     }
                 )
+
+                if debug_data is not None:
+                    # Capture the exact OCR input canvas (CLAHE variant)
+                    # for offline debugging of misreads.
+                    ok_c, buf_c = cv2.imencode(
+                        ".png", enhanced
+                    )
+
+                    if ok_c:
+                        _debug_crop_capture[idx] = (
+                            base64.b64encode(
+                                buf_c.tobytes()
+                            )
+                            .decode("ascii")
+                        )
+
+                    _dbg_entry = next(  # noqa: E501
+                        (
+                            d
+                            for d in debug_data["detections"]
+                            if d.get("plate_id") == idx
+                        ),
+                        None,
+                    )
+
+                    if _dbg_entry is not None:
+                        _dbg_entry["ocr_candidates"] = {
+                            f"tier{tier}": [
+                                {
+                                    "text": item[0],
+                                    "conf": round(
+                                        float(item[1]), 4
+                                    ),
+                                }
+                                for item in cands
+                            ]
+                            for tier, cands in tier_evidence
+                        }
+                        _dbg_entry["selected"] = {
+                            "text": best_text,
+                            "ocr_confidence": round(
+                                best_ocr_conf, 4
+                            ),
+                            "votes": best_votes,
+                            "format_score": validation_score,
+                        }
 
                 # -------------------------------------------------
                 # Debug logging
@@ -3099,8 +3909,6 @@ def run_detection_on_image(
 
     if ok:
 
-        import base64
-
         annotated_b64 = base64.b64encode(
             buf.tobytes()
         ).decode(
@@ -3128,7 +3936,7 @@ def run_detection_on_image(
     # API RESPONSE
     # ========================================================
 
-    return {
+    response: dict[str, Any] = {
         "image": {
             "width": w,
             "height": h,
@@ -3141,3 +3949,42 @@ def run_detection_on_image(
             3,
         ),
     }
+
+    # --------------------------------------------------------
+    # DEBUG MODE (opt-in: caller flag AND LVA_DEBUG_MODE env)
+    # Returns raw YOLO boxes, expanded boxes, per-plate OCR
+    # candidates with confidences, deskew events, and stage
+    # timings. Never enabled by default in production.
+    # --------------------------------------------------------
+
+    if debug_data is not None:
+
+        # Attach the best plate's OCR input crop (highest final
+        # confidence) for offline inspection.
+        best_plate = max(
+            plates,
+            key=lambda p: p["final_confidence"],
+            default=None,
+        )
+
+        if best_plate is not None:
+            crop_b64 = _debug_crop_capture.get(
+                best_plate["plate_id"]
+            )
+
+            if crop_b64:
+                best_plate["debug_ocr_crop_b64"] = crop_b64
+
+        response["debug"] = {
+            "enabled": True,
+            "conf_threshold": conf_threshold,
+            "primary_imgsz": _PRIMARY_IMGSZ,
+            "retry_imgsz": _RETRY_IMGSZ,
+            "detections": debug_data["detections"],
+            "timings_ms": {
+                bucket: round(seconds * 1000, 1)
+                for bucket, seconds in timing.buckets.items()
+            },
+        }
+
+    return response

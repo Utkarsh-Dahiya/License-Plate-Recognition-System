@@ -1,0 +1,21 @@
+# ============================================================================
+# Development / verification extras
+#   pip install -r requirements-dev.txt
+# ============================================================================
+# Includes the production backend requirements plus the extra packages that
+# the test and verification scripts actually import. Production installs should
+# use `app/backend/requirements.txt` instead.
+#
+# Verified against real imports in this repository (nothing added "just in case"):
+#   * requests  -> imported by verify_live_api.py (spawns uvicorn, calls the API)
+#   * psutil    -> imported by verify_suite.py (memory reporting) and the
+#                  diagnostics scripts; verify_suite.py falls back to a ctypes
+#                  implementation if it is missing, so it is optional-but-useful.
+#   * pytest    -> NOT required. The test suite uses the standard-library
+#                  `unittest` framework and runs with `python -m unittest`.
+# ============================================================================
+
+-r app/backend/requirements.txt
+
+requests>=2.31
+psutil>=5.9

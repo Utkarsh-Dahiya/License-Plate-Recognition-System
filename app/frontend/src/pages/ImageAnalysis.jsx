@@ -1,470 +1,424 @@
-import { useEffect, useRef, useState } from 'react'
-import { UploadCloud, Loader2, RotateCcw, ShieldCheck, AlertTriangle, CircleAlert } from 'lucide-react'
+import { useCallback, useRef, useState } from 'react'
+import {
+  Sliders,
+  Play,
+  Loader2,
+  Download,
+  ImageIcon,
+  X,
+  Sparkles,
+} from 'lucide-react'
 import Header from '../components/Header.jsx'
 import { Panel } from '../components/Panel.jsx'
-import StatusBadge from '../components/StatusBadge.jsx'
-import { api } from '../lib/api'
+import SamplePicker from '../components/SamplePicker.jsx'
+import UploadDropzone from '../components/UploadDropzone.jsx'
+import InteractiveCanvas from '../components/InteractiveCanvas.jsx'
+import PlateResultCard from '../components/PlateResultCard.jsx'
+import ProcessingState from '../components/ProcessingState.jsx'
+import EmptyState from '../components/EmptyState.jsx'
+import ErrorNotice from '../components/ErrorNotice.jsx'
+import { useDetection } from '../hooks/useDetection'
 
-const STEPS = [
-  'Loading YOLO...',
-  'Detecting license plates...',
-  'Running OCR...',
-  'Scoring result...',
-]
+function exportResults(result, format) {
+  if (!result || !result.plates) return
 
-function getConfidenceLevel(plate) {
-  const confidence = Number(plate?.final_confidence ?? 0)
+  const rows = result.plates.map((p) => ({
+    plate_id: p.plate_id,
+    ocr_text: p.ocr_text || '',
+    yolo_confidence: p.yolo_confidence,
+    ocr_confidence: p.ocr_confidence,
+    final_confidence: p.final_confidence,
+    status: p.status,
+    state_code: p.state_code || '',
+    state_name: p.state_name || '',
+    strict_format: p.strict_format ?? '',
+    validation_score: p.validation_score ?? '',
+    bbox: (p.bbox || []).join(' '),
+    processing_time_seconds: result.processing_time_seconds,
+    timestamp: new Date().toISOString(),
+  }))
 
-  if (confidence >= 0.8) {
-    return {
-      label: 'HIGH CONFIDENCE',
-      tone: 'high',
-      icon: ShieldCheck,
-    }
+  const filename = `license-plate-detection-${Date.now()}.${format}`
+
+  if (format === 'json') {
+    const blob = new Blob(
+      [
+        JSON.stringify(
+          {
+            platform: 'License Plate Detection & OCR System',
+            generated_at: new Date().toISOString(),
+            plates_detected: result.plates_detected,
+            processing_time_seconds: result.processing_time_seconds,
+            image_dimensions: result.image,
+            plates: rows,
+          },
+          null,
+          2
+        ),
+      ],
+      { type: 'application/json' }
+    )
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+    return
   }
 
-  if (confidence >= 0.5) {
-    return {
-      label: 'NEEDS REVIEW',
-      tone: 'review',
-      icon: AlertTriangle,
-    }
+  const headers = [
+    'plate_id',
+    'ocr_text',
+    'state_code',
+    'state_name',
+    'yolo_confidence',
+    'ocr_confidence',
+    'final_confidence',
+    'status',
+    'strict_format',
+    'validation_score',
+    'bbox',
+    'processing_time_seconds',
+    'timestamp',
+  ]
+  const escapeCsv = (v) => {
+    const s = String(v ?? '')
+    return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s
   }
+  const csvContent = [
+    headers.join(','),
+    ...rows.map((r) => headers.map((h) => escapeCsv(r[h])).join(',')),
+  ].join('\n')
 
-  return {
-    label: 'LOW CONFIDENCE',
-    tone: 'low',
-    icon: CircleAlert,
-  }
-}
-
-function ConfidenceIndicator({ plate }) {
-  const level = getConfidenceLevel(plate)
-  const Icon = level.icon
-  const percentage = Math.max(
-    0,
-    Math.min(100, Number(plate?.final_confidence ?? 0) * 100),
-  )
-
-  const toneClasses = {
-    high: 'border-signal-dim bg-signal-dim/10 text-signal',
-    review: 'border-amber-400/20 bg-amber-400/5 text-amber-300',
-    low: 'border-alert/20 bg-alert/5 text-alert',
-  }
-
-  const barClasses = {
-    high: 'bg-signal',
-    review: 'bg-amber-400',
-    low: 'bg-alert',
-  }
-
-  return (
-    <div
-      className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[10px] font-semibold tracking-wider ${toneClasses[level.tone]}`}
-    >
-      <Icon size={12} />
-      {level.label}
-    </div>
-  )
+  const blob = new Blob([csvContent], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 export default function ImageAnalysis() {
-  const [file, setFile] = useState(null)
-  const [previewUrl, setPreviewUrl] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [stepIndex, setStepIndex] = useState(0)
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState(null)
-  const inputRef = useRef(null)
-  const inFlightRef = useRef(false)
-  const [warmingUp, setWarmingUp] = useState(false)
+  const {
+    file,
+    previewUrl,
+    fileMeta,
+    confThreshold,
+    setConfThreshold,
+    result,
+    error,
+    hoveredPlateId,
+    setHoveredPlateId,
+    selectedPlateId,
+    setSelectedPlateId,
+    selectedSampleId,
+    sampleStatus,
+    warmingUp,
+    elapsedSeconds,
+    isProcessing,
+    selectFile,
+    selectSample,
+    runDetection,
+    reset,
+  } = useDetection()
 
-  // Ask the backend about model readiness on mount and poll while it is
-  // still warming up (Render Free spins instances down; the first visitor
-  // after an idle period pays the model-load cost). Purely informational:
-  // detection stays available even while models are still loading — the
-  // request simply queues until initialization finishes.
-  useEffect(() => {
-    let cancelled = false
-    let attempts = 0
-    let timer = null
+  const replaceInputRef = useRef(null)
 
-    async function check() {
-      try {
-        const r = await api.readiness()
+  // The catalogue is real state, so the "try a sample" action in the empty
+  // state can act on an actual sample object. No document.querySelector.
+  const [samples, setSamples] = useState([])
+  const handleSamplesLoaded = useCallback((list) => setSamples(list), [])
 
-        if (cancelled) return
+  const canDetect = Boolean(file) && !isProcessing && sampleStatus !== 'loading'
+  const hasResult = Boolean(result)
+  const plateCount = result?.plates_detected ?? 0
+  const plates = result?.plates ?? []
 
-        if (r.models_loaded || r.status === 'ready') {
-          setWarmingUp(false)
-          clearInterval(timer)
-          return
-        }
+  /** Pick the first available curated sample (used by the empty state). */
+  const pickFirstSample = useCallback(() => {
+    const candidate = samples.find((s) => s.available !== false) || samples[0]
+    if (candidate) selectSample(candidate)
+  }, [samples, selectSample])
 
-        if (r.status === 'error') {
-          // Permanent load failure: stop polling, let the user try anyway
-          // and surface the real backend error if it persists.
-          setWarmingUp(false)
-          clearInterval(timer)
-          return
-        }
-
-        setWarmingUp(true)
-      } catch {
-        // Readiness itself unreachable — don't nag; a failed detection
-        // surfaces the connection problem with a specific message.
-        if (!cancelled) setWarmingUp(false)
-      }
-    }
-
-    check()
-    timer = setInterval(() => {
-      attempts += 1
-      if (attempts > 36) {
-        // Stop after ~90 s of polling; not worth hammering forever.
-        clearInterval(timer)
-        return
-      }
-      check()
-    }, 2500)
-
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [])
-
-  function handleFile(f) {
-    if (!f) return
-    setFile(f)
-    setPreviewUrl(URL.createObjectURL(f))
-    setResult(null)
-    setError(null)
-  }
-
-  async function runDetection() {
-    if (!file || inFlightRef.current) return
-
-    inFlightRef.current = true
-    setLoading(true)
-    setError(null)
-    setStepIndex(0)
-
-    const stepTimer = setInterval(() => {
-      setStepIndex((i) => Math.min(i + 1, STEPS.length - 1))
-    }, 900)
-
-    try {
-      const res = await api.detectImage(file)
-      setResult(res)
-    } catch (e) {
-      const kind = e?.kind
-      const status = e?.status
-
-      if (kind === 'timeout') {
-        setError(
-          'The detection request timed out. On the free tier the first request after idle loads the ML models and can take a while — please try again.',
-        )
-      } else if (kind === 'config') {
-        setError(
-          e.message ||
-            'The frontend is misconfigured: the API address is missing. Set VITE_API_BASE and redeploy.',
-        )
-      } else if (kind === 'network') {
-        setError(
-          'Cannot reach the backend. The free tier sleeps after inactivity and may be waking up — retry in a few seconds.',
-        )
-      } else if (status === 503) {
-        setError(
-          e.message ||
-            'The backend is still loading its models. Give it a few seconds and run detection again.',
-        )
-      } else if (status === 400 || status === 413) {
-        setError(e.message || 'That file could not be processed as an image.')
-      } else if (status) {
-        setError(e.message || `The backend returned an error (${status}).`)
-      } else {
-        setError(e.message || 'Something went wrong reaching the backend.')
-      }
-    } finally {
-      clearInterval(stepTimer)
-      inFlightRef.current = false
-      setLoading(false)
-    }
-  }
-
-  function reset() {
-    setFile(null)
-    setPreviewUrl(null)
-    setResult(null)
-    setError(null)
-  }
-
-  const bestPlate = result?.plates?.length
-    ? [...result.plates].sort(
-        (a, b) => b.final_confidence - a.final_confidence,
-      )[0]
-    : null
+  /*
+   * Note: there is deliberately no global Enter/Escape shortcut here. It used
+   * to fire detection from a window-level keydown listener, which also fired
+   * when Enter was pressed on any focused control and could submit twice.
+   * The Detect button is a real, keyboard-operable control instead.
+   */
 
   return (
-    <div>
+    <div className="pb-16">
       <Header
-        title="Live / Image Analysis"
-        description="Upload an image and run it through the real YOLO + EasyOCR pipeline."
+        title="Live Detection Studio"
+        description="Inspect vehicle images using the multi-pass YOLO localizer and adaptive OCR cascade."
       />
 
-      <div className="space-y-6 px-8 py-6">
-        {!previewUrl && (
-          <div
-            onClick={() => inputRef.current?.click()}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault()
-              handleFile(e.dataTransfer.files?.[0])
-            }}
-            className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-hairline bg-panel px-8 py-20 text-center transition-colors hover:border-signal/50"
-          >
-            <UploadCloud
-              size={22}
-              className="mb-4 text-ink-faint"
-              strokeWidth={1.5}
-            />
+      <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
+        {/* Curated Sample Gallery */}
+        <SamplePicker
+          selectedSampleId={selectedSampleId}
+          onSelect={selectSample}
+          disabled={isProcessing}
+          loadingSampleId={sampleStatus === 'loading' ? selectedSampleId : null}
+          onSamplesLoaded={handleSamplesLoaded}
+        />
 
-            <p className="text-[13px] text-ink">
-              Drop an image here, or click to browse
-            </p>
+        {/* Upload & Configuration Controls */}
+        {!previewUrl ? (
+          <UploadDropzone onFile={selectFile} disabled={isProcessing} busy={isProcessing} />
+        ) : (
+          /* Active Image Toolbar & Parameters */
+          <div className="rounded-lg border border-hairline bg-panel p-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              {/* File Info + thumbnail preview */}
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="h-12 w-16 shrink-0 overflow-hidden rounded border border-hairline bg-black/40">
+                  <img
+                    src={previewUrl}
+                    alt={`Preview of ${fileMeta?.name || 'the selected image'}`}
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate text-[13px] font-semibold text-ink">
+                      {fileMeta?.name}
+                    </span>
+                    {fileMeta?.sampleTitle && (
+                      <span className="rounded border border-signal/20 bg-signal/10 px-1.5 py-0.2 font-mono text-[9px] font-semibold text-signal">
+                        {fileMeta.sampleTitle}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 font-mono text-[11px] text-ink-faint">
+                    {fileMeta?.size} · {fileMeta?.type}
+                    {fileMeta?.width ? ` · ${fileMeta.width}×${fileMeta.height}px` : ''}
+                  </div>
+                </div>
+              </div>
 
-            <p className="mt-1 text-[12px] text-ink-faint">
-              JPG, PNG, WEBP
-            </p>
+              {/* Confidence Threshold Slider Control */}
+              <div className="flex items-center gap-3 rounded-md border border-hairline-soft bg-panel-raised/70 px-3 py-1.5">
+                <Sliders size={13} className="text-ink-dim" aria-hidden="true" />
+                <label htmlFor="conf-threshold" className="text-[11px] font-medium text-ink-dim">
+                  YOLO Confidence:
+                </label>
+                <input
+                  id="conf-threshold"
+                  type="range"
+                  min="0.05"
+                  max="0.95"
+                  step="0.05"
+                  value={confThreshold}
+                  onChange={(e) => setConfThreshold(parseFloat(e.target.value))}
+                  disabled={isProcessing}
+                  aria-valuetext={`${(confThreshold * 100).toFixed(0)} percent`}
+                  className="w-24 cursor-pointer accent-signal"
+                />
+                <span className="w-10 text-right font-mono text-[11px] font-bold text-signal">
+                  {(confThreshold * 100).toFixed(0)}%
+                </span>
+              </div>
 
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => runDetection()}
+                  disabled={!canDetect}
+                  aria-busy={isProcessing}
+                  className="flex items-center gap-2 rounded-md bg-signal px-4 py-2 text-[13px] font-semibold text-[#062015] shadow-sm transition-colors hover:bg-signal/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 size={15} className="animate-spin" aria-hidden="true" />
+                      <span>Analysing…</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play size={14} fill="currentColor" aria-hidden="true" />
+                      <span>{hasResult ? 'Re-run Detection' : 'Detect Plates'}</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => replaceInputRef.current?.click()}
+                  disabled={isProcessing}
+                  className="flex items-center gap-1.5 rounded-md border border-hairline px-3 py-2 text-[12px] font-medium text-ink-dim transition-colors hover:bg-panel-raised hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+                  title="Choose a different image"
+                >
+                  <ImageIcon size={13} aria-hidden="true" />
+                  <span>Change</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={reset}
+                  disabled={isProcessing}
+                  className="flex items-center gap-1.5 rounded-md border border-hairline px-3 py-2 text-[12px] font-medium text-ink-dim transition-colors hover:bg-panel-raised hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+                  title="Clear the image and return to the upload screen"
+                >
+                  <X size={13} aria-hidden="true" />
+                  <span>Clear</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Hidden picker reused by the "Change" action */}
             <input
-              ref={inputRef}
+              ref={replaceInputRef}
               type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => handleFile(e.target.files?.[0])}
+              accept="image/jpeg,image/png,image/webp"
+              className="sr-only"
+              aria-hidden="true"
+              tabIndex={-1}
+              onChange={(e) => {
+                const picked = e.target.files?.[0]
+                e.target.value = ''
+                if (picked) selectFile(picked)
+              }}
             />
+
+            {/* Model Warmup notice */}
+            {warmingUp && !hasResult && !isProcessing && (
+              <div className="mt-3 flex items-center gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-1.5 text-[11px] text-amber-300">
+                <Loader2 size={12} className="shrink-0 animate-spin" aria-hidden="true" />
+                <span>
+                  Neural models are initializing in the background. The first detection may take a
+                  few moments.
+                </span>
+              </div>
+            )}
           </div>
         )}
 
+        {/* Error Alert. Retry only makes sense when there is an image to
+            re-run; sampleStatus is a string ('idle'/'loading'), so it must
+            be compared explicitly rather than tested for truthiness. */}
+        {error && (
+          <ErrorNotice
+            error={error}
+            onRetry={file && sampleStatus !== 'loading' ? () => runDetection() : null}
+            onDismiss={reset}
+          />
+        )}
+
+        {/* Results Workspace: Dual Column Canvas + Intelligence.
+            The canvas stays on screen during a run so the selected image is
+            never lost; the progress panel takes over the results column. */}
         {previewUrl && (
-          <>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <Panel title="Original image" bodyClassName="p-3">
-                <img
-                  src={previewUrl}
-                  alt="Original upload"
-                  className="w-full rounded-md border border-hairline-soft object-contain"
-                />
-              </Panel>
+          <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
+            {/* Viewport Canvas (Left 7 cols) */}
+            <div className="space-y-4 lg:col-span-7">
+              <InteractiveCanvas
+                src={previewUrl}
+                annotatedSrc={result?.annotated_image_base64}
+                imageMeta={result?.image}
+                plates={plates}
+                hoveredPlateId={hoveredPlateId}
+                selectedPlateId={selectedPlateId}
+                onHoverPlate={setHoveredPlateId}
+                onSelectPlate={setSelectedPlateId}
+                fileName={fileMeta?.name}
+              />
+            </div>
 
+            {/* Plate Results & Intelligence Panel (Right 5 cols) */}
+            <div className="space-y-4 lg:col-span-5">
               <Panel
-                title="Annotated result"
+                title="Recognition Intelligence"
                 subtitle={
-                  result
-                    ? 'YOLO bounding boxes + best OCR read'
-                    : undefined
+                  hasResult
+                    ? `${plateCount} plate${plateCount === 1 ? '' : 's'} localized in ${result.processing_time_seconds}s`
+                    : isProcessing
+                      ? 'Analysis running'
+                      : 'Awaiting inference'
                 }
-                bodyClassName="p-3"
               >
-                {result?.annotated_image_base64 ? (
-                  <img
-                    src={`data:image/jpeg;base64,${result.annotated_image_base64}`}
-                    alt="Annotated result"
-                    className="w-full rounded-md border border-hairline-soft object-contain"
+                {isProcessing ? (
+                  <ProcessingState
+                    elapsedSeconds={elapsedSeconds}
+                    fileName={fileMeta?.name}
+                    warmingUp={warmingUp}
                   />
-                ) : (
-                  <div className="flex h-full min-h-[160px] items-center justify-center rounded-md border border-dashed border-hairline-soft text-center text-[12px] text-ink-faint">
-                    {loading
-                      ? STEPS[stepIndex]
-                      : 'Run detection to see bounding boxes here.'}
-                  </div>
-                )}
-              </Panel>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              {warmingUp && !result && (
-                <span className="flex items-center gap-1.5 rounded-md border border-amber-400/20 bg-amber-400/5 px-2.5 py-1 text-[10px] font-semibold tracking-wider text-amber-300">
-                  <Loader2 size={12} className="animate-spin" />
-                  AI MODELS WARMING UP — DETECTION AVAILABLE SHORTLY
-                </span>
-              )}
-
-              {!result && (
-                <button
-                  onClick={runDetection}
-                  disabled={loading}
-                  title={
-                    warmingUp
-                      ? 'Backend models are still loading — the first run may take longer.'
-                      : undefined
-                  }
-                  className="flex items-center gap-2 rounded-md bg-signal px-4 py-2 text-[13px] font-semibold text-[#062015] transition-colors hover:bg-signal/90 disabled:opacity-60"
-                >
-                  {loading && (
-                    <Loader2 size={14} className="animate-spin" />
-                  )}
-
-                  {loading ? STEPS[stepIndex] : 'Run Detection'}
-                </button>
-              )}
-
-              <button
-                onClick={reset}
-                className="flex items-center gap-2 rounded-md border border-hairline px-4 py-2 text-[13px] text-ink-dim transition-colors hover:bg-panel-raised"
-              >
-                <RotateCcw size={14} />
-                Analyze another image
-              </button>
-            </div>
-
-            {error && (
-              <Panel>
-                <p className="text-[13px] leading-relaxed text-alert">
-                  {error}
-                </p>
-              </Panel>
-            )}
-
-            {result && (
-              <Panel title="Detection results">
-                <div className="mb-5 flex flex-col gap-2 border-b border-hairline-soft pb-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="text-[13px] font-medium text-ink">
-                      {result.plates_detected} plate
-                      {result.plates_detected === 1 ? '' : 's'} detected
-                    </div>
-
-                    <div className="mt-1 text-[11px] text-ink-faint">
-                      Results are classified by observed confidence and may
-                      require human review.
-                    </div>
-                  </div>
-
-                  <span className="font-mono text-[11px] text-ink-dim">
-                    {result.processing_time_seconds}s · YOLO · EasyOCR
-                  </span>
-                </div>
-
-                {result.plates.length === 0 && (
-                  <div className="rounded-md border border-dashed border-hairline-soft p-6 text-center">
-                    <p className="text-[13px] text-ink-dim">
-                      No plate detected in this image.
+                ) : !hasResult ? (
+                  <div className="py-10 text-center">
+                    <Sparkles size={20} className="mx-auto mb-3 text-ink-faint" aria-hidden="true" />
+                    <p className="text-[12px] leading-relaxed text-ink-faint">
+                      Press <span className="font-mono text-ink-dim">Detect Plates</span> to run
+                      plate localization and OCR on this image.
                     </p>
                   </div>
-                )}
-
-                <div className="space-y-4">
-                  {result.plates.map((p) => {
-                    const confidenceLevel = getConfidenceLevel(p)
-                    const percentage = Math.max(
-                      0,
-                      Math.min(100, Number(p.final_confidence ?? 0) * 100),
-                    )
-
-                    const isBest = bestPlate?.plate_id === p.plate_id
-
-                    return (
-                      <div
-                        key={p.plate_id}
-                        className={`overflow-hidden rounded-lg border ${
-                          isBest
-                            ? 'border-signal-dim bg-signal-dim/5'
-                            : 'border-hairline-soft bg-panel'
-                        }`}
-                      >
-                        <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-start sm:justify-between">
-                          <div>
-                            <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-faint">
-                              Detected plate #{p.plate_id}
-                            </div>
-
-                            <div className="font-mono text-2xl font-semibold tracking-[0.12em] text-ink">
-                              {p.ocr_text || 'UNKNOWN'}
-                            </div>
-
-                            <div className="mt-2 text-[11px] text-ink-faint">
-                              OCR output from EasyOCR
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col items-start gap-2 sm:items-end">
-                            <ConfidenceIndicator plate={p} />
-                            <StatusBadge status={p.status} />
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 border-y border-hairline-soft sm:grid-cols-3">
-                          <div className="border-b border-hairline-soft p-4 text-center sm:border-b-0 sm:border-r">
-                            <div className="font-mono text-lg text-ink">
-                              {(p.yolo_confidence * 100).toFixed(1)}%
-                            </div>
-
-                            <div className="mt-1 text-[10px] uppercase tracking-wider text-ink-faint">
-                              YOLO Confidence
-                            </div>
-                          </div>
-
-                          <div className="border-b border-hairline-soft p-4 text-center sm:border-b-0 sm:border-r">
-                            <div className="font-mono text-lg text-ink">
-                              {(p.ocr_confidence * 100).toFixed(1)}%
-                            </div>
-
-                            <div className="mt-1 text-[10px] uppercase tracking-wider text-ink-faint">
-                              OCR Confidence
-                            </div>
-                          </div>
-
-                          <div className="p-4 text-center">
-                            <div className="font-mono text-lg text-signal">
-                              {(p.final_confidence * 100).toFixed(1)}%
-                            </div>
-
-                            <div className="mt-1 text-[10px] uppercase tracking-wider text-ink-faint">
-                              Final Confidence
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="p-4">
-                          <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-wider text-ink-faint">
-                            <span>Confidence score</span>
-                            <span className="font-mono">
-                              {percentage.toFixed(1)}%
-                            </span>
-                          </div>
-
-                          <div className="h-2 overflow-hidden rounded-full bg-panel-raised">
-                            <div
-                              className={`h-full rounded-full transition-all ${{
-                                high: 'bg-signal',
-                                review: 'bg-amber-400',
-                                low: 'bg-alert',
-                              }[confidenceLevel.tone]}`}
-                              style={{ width: `${percentage}%` }}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col gap-2 border-t border-hairline-soft px-4 py-3 text-[11px] text-ink-faint sm:flex-row sm:items-center sm:justify-between">
-                          <span>
-                            Validation:{' '}
-                            {p.validation.replaceAll('_', ' ')}
-                          </span>
-
-                          <span className="font-mono">
-                            bbox [{p.bbox.join(', ')}]
-                          </span>
-                        </div>
+                ) : plateCount === 0 ? (
+                  <EmptyState
+                    imageName={fileMeta?.name}
+                    processingTimeSeconds={result.processing_time_seconds}
+                    confThreshold={confThreshold}
+                    onPickSample={pickFirstSample}
+                    onLowerThresholdAndRun={
+                      confThreshold > 0.05
+                        ? () => {
+                            setConfThreshold(0.05)
+                            runDetection(0.05)
+                          }
+                        : null
+                    }
+                    onReset={reset}
+                  />
+                ) : (
+                  <div className="space-y-4">
+                    {/* Export Actions Toolbar */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline-soft pb-3 text-[11px]">
+                      <span className="font-mono text-ink-dim">
+                        Detector threshold &ge; {(confThreshold * 100).toFixed(0)}%
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => exportResults(result, 'csv')}
+                          aria-label="Export detected plates as CSV"
+                          className="flex items-center gap-1 rounded border border-hairline bg-panel px-2.5 py-1 text-ink-dim transition-colors hover:bg-panel-raised hover:text-ink"
+                          title="Export localized plates as CSV"
+                        >
+                          <Download size={11} aria-hidden="true" /> CSV
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => exportResults(result, 'json')}
+                          aria-label="Export the detection payload as JSON"
+                          className="flex items-center gap-1 rounded border border-hairline bg-panel px-2.5 py-1 text-ink-dim transition-colors hover:bg-panel-raised hover:text-ink"
+                          title="Export intelligence payload as JSON"
+                        >
+                          <Download size={11} aria-hidden="true" /> JSON
+                        </button>
                       </div>
-                    )
-                  })}
-                </div>
+                    </div>
+
+                    {/* Detected Plates List */}
+                    <div className="space-y-3">
+                      {plates.map((plate) => (
+                        <PlateResultCard
+                          key={plate.plate_id}
+                          plate={plate}
+                          imageSrc={previewUrl}
+                          imageMeta={result.image}
+                          isSelected={selectedPlateId === plate.plate_id}
+                          isHovered={hoveredPlateId === plate.plate_id}
+                          onHover={setHoveredPlateId}
+                          onSelect={setSelectedPlateId}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </Panel>
-            )}
-          </>
+            </div>
+          </div>
         )}
       </div>
     </div>

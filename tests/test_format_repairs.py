@@ -29,6 +29,9 @@ from services.detection_service import (  # noqa: E402
     clean_text,
     indian_plate_score,
     strict_indian_plate,
+    INDIAN_STATE_CODES,
+    INDIAN_STATE_NAMES,
+    resolve_indian_state,
 )
 
 
@@ -136,6 +139,94 @@ class PairRepairTests(unittest.TestCase):
         self.assertIn("KL01AP8921", texts)
 
 
+class AmbiguityPairCoverageTests(unittest.TestCase):
+    """Every shape-ambiguous pair the pipeline claims to know must
+    actually be implemented and must actually produce a repair.
+
+    The production spec lists O/0, I/1, Z/2, S/5, B/8, G/6 and Q/0.
+    These tests fail if any of them silently goes missing.
+    """
+
+    def test_ambiguity_table_covers_all_specified_pairs(self):
+        from services.detection_service import _AMBIGUOUS_CHARS
+
+        for a, b in (
+            ("O", "0"),
+            ("I", "1"),
+            ("Z", "2"),
+            ("S", "5"),
+            ("B", "8"),
+            ("G", "6"),
+            ("Q", "0"),
+        ):
+            self.assertIn(a, _AMBIGUOUS_CHARS, f"{a} missing")
+            self.assertEqual(_AMBIGUOUS_CHARS[a], b)
+
+    def test_digit_to_letter_directions_present(self):
+        from services.detection_service import _AMBIGUOUS_CHARS
+
+        for a, b in (("0", "O"), ("1", "I"), ("2", "Z"),
+                     ("5", "S"), ("6", "G"), ("8", "B")):
+            self.assertIn(a, _AMBIGUOUS_CHARS, f"{a} missing")
+            self.assertEqual(_AMBIGUOUS_CHARS[a], b)
+
+    def test_digit_read_as_Z_is_repaired(self):
+        # MH1ZDE1433 is format-invalid (Z is not a digit); one swap on
+        # the Z lands on the strictly valid MH12DE1433.
+        probs = [0.9] * 10
+        evidence = [(1, [cand("MH1ZDE1433", 0.9, probs)])]
+        texts = [t for t, _, _ in _generate_format_repairs(evidence)]
+        self.assertIn("MH12DE1433", texts)
+
+    def test_letter_read_as_two_is_repaired(self):
+        # Mirror direction: a 2 where the series letter Z belongs.
+        probs = [0.9] * 10
+        evidence = [(1, [cand("MH12D21433", 0.9, probs)])]
+        texts = [t for t, _, _ in _generate_format_repairs(evidence)]
+        self.assertIn("MH12DZ1433", texts)
+
+    def test_six_read_as_G_is_repaired(self):
+        probs = [0.9] * 10
+        evidence = [(1, [cand("KL01A68921", 0.9, probs)])]
+        texts = [t for t, _, _ in _generate_format_repairs(evidence)]
+        self.assertIn("KL01AG8921", texts)
+
+    def test_Q_read_as_letter_is_repaired_to_zero(self):
+        # A zero with a tail reads as Q; MH2QEE7597 -> MH20EE7597.
+        probs = [0.9] * 10
+        evidence = [(1, [cand("MH2QEE7597", 0.9, probs)])]
+        texts = [t for t, _, _ in _generate_format_repairs(evidence)]
+        self.assertIn("MH20EE7597", texts)
+
+    def test_new_pairs_never_touch_a_strict_valid_plate(self):
+        # Plates containing the new glyphs that are ALREADY valid must be
+        # returned untouched — no repair may rewrite a correct read.
+        for text in ("KL01AG8921", "MH12DZ1433", "MH20EE7597"):
+            self.assertTrue(strict_indian_plate(text), text)
+            probs = [0.9] * len(text)
+            self.assertEqual(
+                _generate_format_repairs([(1, [cand(text, 0.95, probs)])]),
+                [],
+                text,
+            )
+
+    def test_swap_must_land_on_strict_validity(self):
+        # A Z swap on an unknown state code produces nothing: the repair
+        # rule is format-gated, not "swap whenever a glyph looks odd".
+        probs = [0.9] * 10
+        evidence = [(1, [cand("XX1ZDE1433", 0.9, probs)])]
+        self.assertEqual(_generate_format_repairs(evidence), [])
+
+    def test_recognizer_misread_is_not_fabricated(self):
+        # IHI2DE1433 (GT MH12DE1433) is a RECOGNIZER error, not a glyph
+        # confusion: M/I is not a shape-ambiguous pair. No repair may
+        # invent MH12DE1433 out of it.
+        probs = [0.9] * 10
+        evidence = [(1, [cand("IHI2DE1433", 0.9, probs)])]
+        texts = [t for t, _, _ in _generate_format_repairs(evidence)]
+        self.assertNotIn("MH12DE1433", texts)
+
+
 class ValidSourceTests(unittest.TestCase):
     def test_strict_valid_source_earns_no_repairs(self):
         # KL01AP8921 is already valid — no candidate may rewrite it.
@@ -215,6 +306,48 @@ class ScorerSanityTests(unittest.TestCase):
             _strict_format_adjustment("KL01AP8921"),
             _strict_format_adjustment("LKL0AP8921"),
         )
+
+
+class StateResolutionTests(unittest.TestCase):
+    def test_all_state_codes_have_names(self):
+        for code in INDIAN_STATE_CODES:
+            self.assertIn(code, INDIAN_STATE_NAMES)
+            self.assertTrue(len(INDIAN_STATE_NAMES[code]) > 0)
+
+    def test_resolve_standard_plates(self):
+        code, name = resolve_indian_state("MH12DE1433")
+        self.assertEqual(code, "MH")
+        self.assertEqual(name, "Maharashtra")
+
+        code, name = resolve_indian_state("DL3CAY9324")
+        self.assertEqual(code, "DL")
+        self.assertEqual(name, "Delhi")
+
+        code, name = resolve_indian_state("KA51AA3469")
+        self.assertEqual(code, "KA")
+        self.assertEqual(name, "Karnataka")
+
+        code, name = resolve_indian_state("KL01AP8921")
+        self.assertEqual(code, "KL")
+        self.assertEqual(name, "Kerala")
+
+        code, name = resolve_indian_state("HR26BC55")
+        self.assertEqual(code, "HR")
+        self.assertEqual(name, "Haryana")
+
+    def test_resolve_formatted_with_separators(self):
+        code, name = resolve_indian_state("MH-12-DE-1433")
+        self.assertEqual(code, "MH")
+        self.assertEqual(name, "Maharashtra")
+
+    def test_resolve_invalid_or_short(self):
+        code, name = resolve_indian_state("XX01AP8921")
+        self.assertIsNone(code)
+        self.assertIsNone(name)
+
+        code, name = resolve_indian_state("A")
+        self.assertIsNone(code)
+        self.assertIsNone(name)
 
 
 if __name__ == "__main__":
