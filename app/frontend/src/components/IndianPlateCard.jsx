@@ -5,9 +5,12 @@ export default function IndianPlateCard({ plate, isSelected = false, className =
 
   const text = (plate.ocr_text || '').trim()
   const hasText = text.length > 0
-  const stateCode = plate.state_code || (hasText && text.length >= 2 ? text.slice(0, 2) : null)
+  // Use ONLY the state the backend actually resolved. Previously this fell
+  // back to text.slice(0, 2), which fabricated a state badge (e.g. "EM" for
+  // a read whose state_code was null because EM is not a real RTO code).
+  // An unresolved state is now shown as such instead of being invented.
+  const stateCode = plate.state_code || null
   const stateName = plate.state_name || null
-  const conf = Number(plate.final_confidence || 0)
   const isStrict = plate.strict_format === true
 
   return (
@@ -44,13 +47,21 @@ export default function IndianPlateCard({ plate, isSelected = false, className =
             </div>
           )}
 
-          {/* State & Series Subtitle */}
-          {(stateName || stateCode) && (
-            <div className="mt-0.5 flex items-center gap-2 text-[10px] font-mono font-medium text-ink-dim tracking-wider uppercase">
-              <span className="text-signal">{stateCode}</span>
-              {stateName && <span>· {stateName}</span>}
+          {/* State & Series Subtitle.
+              Rendered whenever the backend gave a verdict, including when
+              that verdict is "unresolved" — never a fabricated code. */}
+          {(stateName || stateCode || !isStrict) && (
+            <div className="mt-0.5 flex items-center gap-2 text-[10px] font-mono font-medium tracking-wider text-ink-dim uppercase">
+              {stateCode ? (
+                <>
+                  <span className="text-signal">{stateCode}</span>
+                  {stateName && <span>· {stateName}</span>}
+                </>
+              ) : (
+                <span className="text-ink-faint">State not resolved</span>
+              )}
               {isStrict && (
-                <span className="rounded bg-signal/10 px-1 py-0.2 text-[9px] text-signal font-semibold border border-signal/20">
+                <span className="rounded border border-signal/20 bg-signal/10 px-1 py-0.2 text-[9px] font-semibold text-signal">
                   Standard Format
                 </span>
               )}

@@ -26,6 +26,11 @@ export const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 export const ACCEPTED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
+// Video uploads follow the same rule in app/backend/main.py: any `video/*`
+// content type, capped at MAX_VIDEO_BYTES (50 MB). Mirroring it here fails an
+// oversized or wrong file before the upload starts.
+export const MAX_VIDEO_BYTES = 50 * 1024 * 1024
+
 // Default request timeout. Detection (model warm start ~8-9 s, warm ~0.5-1.2 s
 // locally on free-CPU hardware) plus Render Free cold-start wake-up needs more
 // headroom than a typical API call.

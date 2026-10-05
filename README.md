@@ -234,6 +234,27 @@ video:
 
 Interactive docs are available at `/docs` when the server is running.
 
+### Logging
+
+The backend emits a concise access line per request (`METHOD /path -> status in
+N ms`) plus model-warmup and video-job lifecycle messages. Query strings and
+bodies are deliberately never logged, since they can contain filenames and plate
+text.
+
+Set `LVA_DEBUG_TIMING=0` for quieter logs. It suppresses successful (2xx) and
+client-error (4xx) access lines; **5xx responses and unhandled exceptions are
+always logged at WARNING** with the traceback kept server-side, so quiet mode
+can never hide a real incident. Clients only ever receive a generic error
+message.
+
+### Upload handling
+
+Image uploads are capped at 10 MB and videos at 50 MB, and both are staged
+through a temporary file that is always deleted, including on failure and on
+server shutdown. The staged video suffix is chosen from a fixed allowlist of
+container formats rather than being copied from the client-supplied filename, so
+a crafted name cannot steer the temp file outside the system temp directory.
+
 ## Frontend overview
 
 A React 18 + Vite + Tailwind single-page console with a dark, instrument-panel
@@ -249,6 +270,11 @@ style. Routes:
 | `/registry` | Plate Registry — searchable list with a detail drawer |
 | `/model` | Model Performance — detector/OCR info and real training metrics |
 | `/system` | System — engines and data-source status |
+| `*` (anything else) | 404 — unknown URLs render inside the app shell |
+
+Every page is a separate lazily-loaded chunk, so the initial load does not pay
+for pages the visitor never opens. A top-level `ErrorBoundary` catches render
+errors, and a `Suspense` fallback covers chunk loading.
 
 `src/lib/api.js` is the single fetch wrapper: it applies per-call timeouts, surfaces
 typed errors, and refuses to silently call `localhost` in a production build (it
@@ -271,6 +297,7 @@ app/frontend/                   React + Vite + Tailwind UI
   src/pages/                    One file per route
   src/components/               Sidebar, panels, cards, viewport
   src/hooks/useDetection.js     Detection state machine
+  src/hooks/useAsyncResource.js Loading/error/retry + stale-response guard
   src/lib/api.js                Typed fetch wrapper
 batch_results/                  Saved 658-image CSV + dashboard JSON
 video_results/                  Saved video CSV/JSON (+ local annotated mp4)
@@ -280,7 +307,6 @@ tests/                          Unit tests (unittest)
 plate_pipeline.py, video_pipeline.py, batch_test.py   Offline scripts
 verify_suite.py, verify_live_api.py                    Verification harnesses
 requirements-dev.txt            Dev/test extras
-implementation_plan.md          Roadmap
 ```
 
 ## Run the product
@@ -324,7 +350,7 @@ required for local development.
   | `LVA_ANNOTATED_VIDEO` | `video_results/annotated_video.mp4` | Annotated player |
   | `LVA_TRAINING_RESULTS_CSV` | `runs/.../results.csv` | Training metrics |
   | `LVA_FRONTEND_ORIGIN` | localhost:5173 | CORS allow-list (comma-separated) |
-  | `LVA_DEBUG_TIMING` | `1` | Per-request timing logs (set `0` in prod) |
+  | `LVA_DEBUG_TIMING` | `1` | Per-request timing logs **and** the API access log (set `0` in prod; 5xx still logs) |
   | `LVA_DEBUG_MODE` | `0` | Enables the debug crop endpoint (never in prod) |
 
 - **Frontend** — copy `app/frontend/.env.example` to `.env.local`. Only
@@ -432,21 +458,25 @@ runs\detect\models\license_plate_detector\weights\best.pt
   comparison, not as a held-out benchmark.
 - Large weights/video are gitignored, so a fresh clone needs them supplied
   locally (see above).
-- The frontend production bundle is a single large JS chunk (a Vite size warning);
-  see `implementation_plan.md` for the planned code-splitting step.
+- `charts-vendor` (~400 kB gzip ~108 kB) is the largest chunk. It is only
+  fetched when **Overview** is opened, so it is not part of the initial load,
+  but the first navigation to Overview does pay for it.
 - Only Indian registration formats are validated; other countries are out of scope.
 
 ## Future improvements
 
-These are **not yet implemented** — they are the roadmap, tracked in
-`implementation_plan.md`:
+These are **not yet implemented** — they are the remaining roadmap:
 
-- Route-level code splitting for the frontend bundle.
-- A 404 route and a top-level React error boundary.
 - Direct Cloudinary/Azure deployment with persistent storage for weights/results.
-- Playwright-based end-to-end UI tests.
+- Playwright-based end-to-end UI tests committed to the repository (the current
+  headless UI suite is a temporary local harness and is intentionally not tracked).
 - Optional containerisation (Dockerfile) for reproducible deployment.
 - An expanded curated sample gallery and richer per-plate detail views.
+
+Already done in earlier phases, and therefore no longer on the roadmap:
+
+- Route-level code splitting for the frontend bundle (Phase 4A).
+- A 404 route and a top-level React error boundary (Phase 4A).
 
 ## Deployment (Render)
 

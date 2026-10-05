@@ -1,5 +1,5 @@
 """
-LICENSE VISION AI
+LICENSE PLATE DETECTION & OCR SYSTEM
 YOLO + EasyOCR
 Indian License Plate Detection + OCR Pipeline
 
@@ -405,7 +405,7 @@ def candidate_score(text, ocr_conf):
 # ============================================================
 
 print("=" * 78)
-print("LICENSE VISION AI — YOLO + EASYOCR")
+print("LICENSE PLATE DETECTION & OCR SYSTEM — YOLO + EASYOCR")
 print("INDIAN LICENSE PLATE OCR PIPELINE")
 print("=" * 78)
 
@@ -1002,7 +1002,7 @@ mean_yolo_conf = float(
 
 dashboard_data = {
 
-    "project": "License Vision AI",
+    "project": "LICENSE PLATE DETECTION & OCR SYSTEM",
 
     "version": "2.0",
 
@@ -1070,7 +1070,7 @@ with open(
 report = []
 
 report.append(
-    "LICENSE VISION AI"
+    "LICENSE PLATE DETECTION & OCR SYSTEM"
 )
 
 report.append(
@@ -1160,7 +1160,7 @@ with open(
 
 print()
 print("=" * 78)
-print("LICENSE VISION AI — FINAL RESULT")
+print("LICENSE PLATE DETECTION & OCR SYSTEM — FINAL RESULT")
 print("=" * 78)
 
 for p in plate_results:

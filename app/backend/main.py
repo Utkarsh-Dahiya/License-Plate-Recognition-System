@@ -28,9 +28,9 @@ The API reads the project's real generated data files.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
-import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -43,6 +43,7 @@ from fastapi import (
     File,
     HTTPException,
     Query,
+    Request,
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
@@ -56,6 +57,27 @@ from services import data_loader, history_log
 # ============================================================
 # APP
 # ============================================================
+
+# Declared before the lifespan so startup logging can use it. Uvicorn only
+# configures its own loggers, so a module-level logger would otherwise fall
+# back to the "no handler" behaviour and print nothing (or emit through the
+# root logger's lastResort handler at WARNING with no formatting). Attach a
+# plain stream handler once, matching the detection service's approach.
+logger = logging.getLogger("license_vision.api")
+
+if not logger.handlers:
+    _api_handler = logging.StreamHandler()
+    _api_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(_api_handler)
+    logger.propagate = False
+
+# One knob for "noisy diagnostics". Access lines for successful requests and
+# the detection service's per-stage OCR timings share this switch. Level is
+# lowered to WARNING in quiet mode so 5xx responses and unhandled exceptions
+# are STILL logged; only 2xx/4xx access lines are suppressed.
+_TIMING_ENABLED = os.environ.get("LVA_DEBUG_TIMING", "1") != "0"
+
+logger.setLevel(logging.INFO if _TIMING_ENABLED else logging.WARNING)
 
 # Model-heavy work (YOLO + OCR, one video job) runs on a DEDICATED bounded
 # executor — NOT the process-wide AnyIO pool that FastAPI/Starlette use for
@@ -100,12 +122,18 @@ async def _warmup_models() -> None:
 
         await run_in_threadpool(_ensure_models_loaded)
 
+        logger.info("Model warmup complete (YOLO + OCR ready).")
+
     except Exception:
         # Never crash the app because warmup failed (missing weights,
         # OOM on a cold free-tier dyno). /api/readiness surfaces the
         # load error; the next detection request retries the load via
         # the normal lazy path.
-        traceback.print_exc()
+        logger.warning(
+            "Model warmup failed at startup; detection requests will retry "
+            "the load lazily.",
+            exc_info=True,
+        )
 
     finally:
         _startup_warmup_done = True
@@ -187,6 +215,93 @@ app.add_middleware(
 
 
 # ============================================================
+# REQUEST LOGGING / TIMING
+#
+# One concise line per request: method, path, status, duration. This is the
+# minimum needed to tell "the model is slow" apart from "the endpoint is
+# broken" in a deployed log, without dumping payloads.
+#
+# It follows the SAME LVA_DEBUG_TIMING switch the detection service already
+# uses (defined at the top of this module), so operators have one knob:
+# LVA_DEBUG_TIMING=0 silences both the per-stage OCR timings and these access
+# lines.
+#
+# Severity is chosen so that switching timing off can never hide a real
+# incident: 5xx responses and unhandled exceptions are logged at WARNING and
+# always emitted. 4xx responses (bad upload, unknown job id) are routine
+# client mistakes and are logged at INFO, so they disappear in quiet mode.
+#
+# Deliberately excluded: query strings and bodies (they can carry filenames
+# and plate text), and any header that might hold credentials.
+# ============================================================
+
+# Endpoints polled in tight loops by the frontend; a per-poll line would bury
+# everything else without adding information.
+_QUIET_PATHS = frozenset(
+    {
+        "/api/health",
+        "/api/readiness",
+    }
+)
+
+
+@app.middleware("http")
+async def log_request(request: Request, call_next):
+    """Access log with duration; logs every failure regardless of verbosity."""
+
+    started = time.perf_counter()
+
+    try:
+        response = await call_next(request)
+
+    except Exception:
+        # Let the global handler render the 500; just record that it happened.
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        logger.warning(
+            "%s %s -> unhandled error in %.1f ms",
+            request.method,
+            request.url.path,
+            elapsed_ms,
+            exc_info=True,
+        )
+        raise
+
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    path = request.url.path
+
+    if response.status_code >= 500:
+        logger.warning(
+            "%s %s -> %d in %.1f ms",
+            request.method,
+            path,
+            response.status_code,
+            elapsed_ms,
+        )
+
+    elif response.status_code >= 400:
+        # 4xx is usually the caller's mistake (bad file, unknown job id), so
+        # it is worth seeing but is not an incident.
+        logger.info(
+            "%s %s -> %d in %.1f ms",
+            request.method,
+            path,
+            response.status_code,
+            elapsed_ms,
+        )
+
+    elif _TIMING_ENABLED and path not in _QUIET_PATHS:
+        logger.info(
+            "%s %s -> %d in %.1f ms",
+            request.method,
+            path,
+            response.status_code,
+            elapsed_ms,
+        )
+
+    return response
+
+
+# ============================================================
 # STATIC VIDEO FILES
 # ============================================================
 
@@ -206,7 +321,14 @@ if data_loader.VIDEO_RESULTS_DIR.exists():
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request, exc):  # noqa: ANN001
-    traceback.print_exc()
+    # Full traceback to the server log (never to the client); the response
+    # body stays generic unless app.debug is explicitly enabled.
+    logger.warning(
+        "Unhandled error on %s %s",
+        request.method,
+        request.url.path,
+        exc_info=True,
+    )
 
     return JSONResponse(
         status_code=500,
@@ -898,6 +1020,43 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_VIDEO_BYTES = 50 * 1024 * 1024
 MAX_DEMO_OCR_FRAMES = 120
 
+# Container extensions OpenCV is expected to open. The temp file that a video
+# upload is staged through needs a suffix the decoder recognises, but that
+# suffix must never be taken verbatim from the client-supplied filename: a name
+# like "clip.mp4/../../x" yields the suffix "./../../x", which
+# tempfile.NamedTemporaryFile turns into a path OUTSIDE the temp directory (or
+# an unhandled FileNotFoundError when the intermediate directory is absent).
+# Restricting the suffix to this allowlist removes that class of problem and
+# keeps the staged filename predictable.
+_ALLOWED_VIDEO_SUFFIXES = (
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".webm",
+    ".m4v",
+    ".mpg",
+    ".mpeg",
+    ".wmv",
+    ".flv",
+    ".3gp",
+)
+
+
+def _safe_video_suffix(filename: str | None) -> str:
+    """Return an allowlisted container suffix for the staging temp file.
+
+    Anything unrecognised (no extension, a traversal-shaped name, an exotic
+    container) falls back to ".mp4", which is the format the demo dataset and
+    the documented upload path use. Never raises.
+    """
+    name = (filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    _, dot, ext = name.rpartition(".")
+    candidate = f".{ext.lower()}" if dot else ""
+    if candidate in _ALLOWED_VIDEO_SUFFIXES:
+        return candidate
+    return ".mp4"
+
 
 @app.post("/api/detect/image")
 async def detect_image(
@@ -1165,6 +1324,8 @@ def _process_video_job(
     cap = None
 
     try:
+        logger.info("Video job %s starting.", job_id[:8])
+
         _ensure_models_loaded()
 
         cap = cv2.VideoCapture(
@@ -1283,6 +1444,14 @@ def _process_video_job(
         job["status"] = "completed"
         job["finished_at"] = time.time()
 
+        logger.info(
+            "Video job %s completed: %d frames, %d detections in %.1fs.",
+            job_id[:8],
+            job["processed_frames"],
+            job["detections_so_far"],
+            job["finished_at"] - job["started_at"],
+        )
+
         history_log.log_entry(
             "video",
             filename=job.get("filename"),
@@ -1306,6 +1475,8 @@ def _process_video_job(
     except Exception as exc:
         job["status"] = "failed"
         job["error"] = str(exc)
+
+        logger.warning("Video job %s failed: %s", job_id[:8], exc)
 
         history_log.log_entry(
             "video",
@@ -1369,17 +1540,7 @@ async def process_video(
         uuid.uuid4()
     )
 
-    suffix = (
-        "."
-        + (
-            file.filename.rsplit(
-                ".",
-                1,
-            )[-1]
-            if "." in (file.filename or "")
-            else "mp4"
-        )
-    )
+    suffix = _safe_video_suffix(file.filename)
 
     tmp = tempfile.NamedTemporaryFile(
         delete=False,
@@ -1446,13 +1607,23 @@ async def process_video(
     # health/dashboard/status endpoints for the whole duration.
     loop = asyncio.get_running_loop()
 
-    loop.run_in_executor(
-        _detection_pool,
-        _process_video_job,
-        job_id,
-        tmp.name,
-        frame_skip,
-    )
+    try:
+        loop.run_in_executor(
+            _detection_pool,
+            _process_video_job,
+            job_id,
+            tmp.name,
+            frame_skip,
+        )
+
+    except Exception:
+        # The worker never started, so nothing will ever clean this job up:
+        # _process_video_job owns the temp-file unlink in its `finally`. Roll
+        # the registration back here instead of leaving a permanently "queued"
+        # job and an orphaned temp file on disk.
+        _video_jobs.pop(job_id, None)
+        Path(tmp.name).unlink(missing_ok=True)
+        raise
 
     return {
         "job_id": job_id,

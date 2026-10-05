@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Search,
   X,
@@ -12,11 +12,18 @@ import {
   CheckCircle2,
   Gauge,
   Eye,
+  Loader2,
 } from 'lucide-react'
 import Header from '../components/Header.jsx'
 import { Panel } from '../components/Panel.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
+import ErrorNotice from '../components/ErrorNotice.jsx'
 import { api } from '../lib/api'
+import { useAsyncResource, useDebouncedValue } from '../hooks/useAsyncResource'
+
+// The search box is instant, but the API only sees the value once it settles,
+// so typing never fires a request per keystroke.
+const SEARCH_DEBOUNCE_MS = 300
 
 function fmtTime(s) {
   if (s === null || s === undefined || !Number.isFinite(Number(s))) return '—'
@@ -147,29 +154,41 @@ function SummaryCard({ icon: Icon, label, value, detail, accent = false }) {
 }
 
 export default function PlateRegistry() {
-  const [plates, setPlates] = useState({ total: 0, results: [] })
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('confidence')
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [selected, setSelected] = useState(null)
-  const [detail, setDetail] = useState(null)
-  const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
-    setLoading(true)
+  const settledSearch = useDebouncedValue(search, SEARCH_DEBOUNCE_MS)
 
-    const params = { sort }
+  // loading / error / retry / out-of-order-reply protection for the list.
+  // A failed fetch is now visible (and retryable) instead of being masked as
+  // "No plate identities found".
+  const registry = useAsyncResource(
+    () => {
+      const params = { sort }
+      const needle = settledSearch.trim()
+      if (needle) params.search = needle
+      return api.plates(params)
+    },
+    [sort, settledSearch],
+    { initialData: { total: 0, results: [] } },
+  )
 
-    if (search.trim()) {
-      params.search = search.trim()
-    }
+  const plates = registry.data
 
-    api
-      .plates(params)
-      .then(setPlates)
-      .catch(() => setPlates({ total: 0, results: [] }))
-      .finally(() => setLoading(false))
-  }, [search, sort])
+  // Driven by `selected`: resolves to null when the drawer closes, and a
+  // failed fetch surfaces an error with retry — it used to spin forever.
+  const detailResource = useAsyncResource(
+    () => (selected ? api.plateDetail(selected) : Promise.resolve(null)),
+    [selected],
+  )
+
+  // The drawer below keeps reading `detail` as plain data, unchanged.
+  // Stale-while-revalidate keeps the PREVIOUS plate's payload in `data`, so it
+  // is only trusted while `dataKey` still matches the open selection —
+  // otherwise a failed fetch would render another plate's record.
+  const detail = detailResource.dataKey === selected ? detailResource.data : null
 
   const visiblePlates = useMemo(() => {
     if (statusFilter === 'ALL') {
@@ -179,18 +198,20 @@ export default function PlateRegistry() {
     return plates.results.filter((p) => p.status === statusFilter)
   }, [plates.results, statusFilter])
 
+  const panelRef = useRef(null)
+
+  // Dialog behaviour: Escape closes, and focus moves into the drawer when it
+  // opens so keyboard users are not left behind it.
   useEffect(() => {
-    if (!selected) {
-      setDetail(null)
-      return
+    if (!selected) return undefined
+
+    panelRef.current?.focus()
+
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setSelected(null)
     }
-
-    setDetail(null)
-
-    api
-      .plateDetail(selected)
-      .then(setDetail)
-      .catch(() => setDetail(null))
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
   }, [selected])
 
   const counts = useMemo(() => {
@@ -287,16 +308,19 @@ export default function PlateRegistry() {
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
+                  aria-label="Search plate number"
                   placeholder="Search plate number..."
                   className="w-full rounded-lg border border-hairline bg-panel-raised py-2.5 pl-9 pr-9 font-mono text-[11px] text-ink outline-none placeholder:text-ink-faint transition-colors focus:border-signal/30"
                 />
 
                 {search && (
                   <button
+                    type="button"
                     onClick={() => setSearch('')}
+                    aria-label="Clear search"
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-faint hover:text-ink"
                   >
-                    <X size={13} />
+                    <X size={13} aria-hidden="true" />
                   </button>
                 )}
               </div>
@@ -304,6 +328,7 @@ export default function PlateRegistry() {
               <select
                 value={sort}
                 onChange={(e) => setSort(e.target.value)}
+                aria-label="Sort plate registry"
                 className="rounded-lg border border-hairline bg-panel-raised px-3 py-2.5 text-[11px] text-ink outline-none focus:border-signal/30"
               >
                 <option value="confidence">Sort: Confidence</option>
@@ -313,17 +338,27 @@ export default function PlateRegistry() {
             </div>
 
             <div className="flex items-center gap-2 text-[10px] text-ink-faint">
-              <Activity size={13} className={loading ? 'animate-pulse text-signal' : ''} />
+              <Activity
+                size={13}
+                className={registry.loading ? 'animate-pulse text-signal' : ''}
+                aria-hidden="true"
+              />
 
-              <span>
-                Showing{' '}
-                <span className="font-mono text-ink-dim">
-                  {visiblePlates.length}
-                </span>{' '}
-                of{' '}
-                <span className="font-mono text-ink-dim">
-                  {plates.total}
-                </span>
+              <span role="status">
+                {registry.loading && plates.total === 0 ? (
+                  'Loading registry…'
+                ) : (
+                  <>
+                    Showing{' '}
+                    <span className="font-mono text-ink-dim">
+                      {visiblePlates.length}
+                    </span>{' '}
+                    of{' '}
+                    <span className="font-mono text-ink-dim">
+                      {plates.total}
+                    </span>
+                  </>
+                )}
               </span>
             </div>
           </div>
@@ -338,7 +373,9 @@ export default function PlateRegistry() {
             ].map(([value, label, count]) => (
               <button
                 key={value}
+                type="button"
                 onClick={() => setStatusFilter(value)}
+                aria-pressed={statusFilter === value}
                 className={`rounded-lg border px-3 py-1.5 text-[10px] font-medium transition-all ${
                   statusFilter === value
                     ? 'border-signal/20 bg-signal/[0.06] text-signal'
@@ -360,7 +397,25 @@ export default function PlateRegistry() {
           subtitle="Click any identity to inspect its complete observation history."
           bodyClassName="p-0"
         >
-          <div className="overflow-x-auto">
+          {/* A failed list fetch is reported with a retry instead of being
+              shown as an empty registry. */}
+          {registry.error && (
+            <div className="px-5 py-4">
+              <ErrorNotice
+                error={registry.error}
+                onRetry={registry.retry}
+                retryLabel="Reload registry"
+              />
+            </div>
+          )}
+
+          <div
+            className="overflow-x-auto"
+            role="region"
+            aria-label="Unique plate identities"
+            aria-busy={registry.loading}
+            tabIndex={0}
+          >
             <table className="w-full min-w-[850px] text-left text-[11px]">
               <thead>
                 <tr className="bg-white/[0.012] text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-faint">
@@ -437,23 +492,50 @@ export default function PlateRegistry() {
                       </td>
 
                       <td className="px-5 py-3.5">
-                        <ChevronRight
-                          size={14}
-                          className="text-ink-faint opacity-40 transition-all group-hover:translate-x-0.5 group-hover:text-signal group-hover:opacity-100"
-                        />
+                        {/* A real button makes "inspect" keyboard-reachable;
+                            the row onClick above still serves mouse users. */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelected(p.plate)
+                          }}
+                          aria-label={`Inspect ${p.plate}`}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-faint transition-all hover:bg-white/[0.04] hover:text-signal focus:outline-none focus-visible:ring-1 focus-visible:ring-signal/50"
+                        >
+                          <ChevronRight
+                            size={14}
+                            aria-hidden="true"
+                            className="opacity-40 transition-all group-hover:translate-x-0.5 group-hover:text-signal group-hover:opacity-100"
+                          />
+                        </button>
                       </td>
                     </tr>
                   )
                 })}
 
-                {visiblePlates.length === 0 && (
+                {registry.loading && visiblePlates.length === 0 && (
+                  <tr>
+                    <td colSpan="7" className="px-5 py-16 text-center">
+                      <span
+                        role="status"
+                        className="inline-flex items-center gap-2 text-ink-faint"
+                      >
+                        <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+                        Loading plate identities…
+                      </span>
+                    </td>
+                  </tr>
+                )}
+
+                {!registry.loading && !registry.error && visiblePlates.length === 0 && (
                   <tr>
                     <td colSpan="7" className="px-5 py-16 text-center">
                       <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl border border-hairline-soft text-ink-faint">
                         <Search size={18} />
                       </div>
 
-                      <p className="mt-4 text-[12px] font-medium text-ink">
+                      <p role="status" className="mt-4 text-[12px] font-medium text-ink">
                         No plate identities found
                       </p>
 
@@ -463,6 +545,7 @@ export default function PlateRegistry() {
 
                       {(search || statusFilter !== 'ALL') && (
                         <button
+                          type="button"
                           onClick={() => {
                             setSearch('')
                             setStatusFilter('ALL')
@@ -500,8 +583,13 @@ export default function PlateRegistry() {
           onClick={() => setSelected(null)}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Plate intelligence record for ${selected}`}
+            tabIndex={-1}
+            ref={panelRef}
             onClick={(e) => e.stopPropagation()}
-            className="h-full w-full max-w-[480px] overflow-y-auto border-l border-hairline bg-panel shadow-2xl"
+            className="h-full w-full max-w-[480px] overflow-y-auto border-l border-hairline bg-panel shadow-2xl focus:outline-none"
           >
             {/* Drawer header */}
             <div className="sticky top-0 z-10 border-b border-hairline-soft bg-panel/95 px-6 py-5 backdrop-blur-xl">
@@ -523,15 +611,27 @@ export default function PlateRegistry() {
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => setSelected(null)}
+                  aria-label="Close plate details"
                   className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-white/[0.04] hover:text-ink"
                 >
-                  <X size={16} />
+                  <X size={16} aria-hidden="true" />
                 </button>
               </div>
             </div>
 
-            {detail ? (
+            {/* A failed detail read used to leave this drawer spinning
+                forever; it now reports and offers a retry. */}
+            {detailResource.error && !detail ? (
+              <div className="p-6">
+                <ErrorNotice
+                  error={detailResource.error}
+                  onRetry={detailResource.retry}
+                  retryLabel="Reload record"
+                />
+              </div>
+            ) : detail ? (
               <div className="space-y-6 p-6">
                 {/* Confidence overview */}
                 <div className="rounded-xl border border-signal/15 bg-signal/[0.025] p-4">
@@ -700,7 +800,11 @@ export default function PlateRegistry() {
                 </div>
               </div>
             ) : (
-              <div className="flex min-h-[300px] flex-col items-center justify-center px-6 text-center">
+              <div
+                role="status"
+                aria-live="polite"
+                className="flex min-h-[300px] flex-col items-center justify-center px-6 text-center"
+              >
                 <LoaderIcon />
 
                 <p className="mt-4 text-[12px] font-medium text-ink">

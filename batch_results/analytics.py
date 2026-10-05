@@ -349,7 +349,7 @@ with open(
 
 print("\n")
 print("=" * 70)
-print("LICENSE VISION AI — ANALYTICS ENGINE")
+print("LICENSE PLATE DETECTION & OCR SYSTEM — ANALYTICS ENGINE")
 print("=" * 70)
 
 print("\nDATASET")

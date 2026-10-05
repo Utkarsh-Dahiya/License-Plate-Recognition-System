@@ -12,7 +12,7 @@ import easyocr
 
 
 # ============================================================
-# LICENSE VISION AI
+# LICENSE PLATE DETECTION & OCR SYSTEM
 # VIDEO ALPR ENGINE
 #
 # YOLO + EASYOCR + TEMPORAL OCR CONSENSUS
@@ -457,7 +457,7 @@ def main():
 
     print("=" * 78)
     print(
-        "LICENSE VISION AI — TEMPORAL OCR ENGINE"
+        "LICENSE PLATE DETECTION & OCR SYSTEM — TEMPORAL OCR ENGINE"
     )
     print(
         "YOLO + EASYOCR + OCR CONSENSUS"
@@ -932,7 +932,7 @@ def main():
 
         cv2.putText(
             display_frame,
-            "LICENSE VISION AI",
+            "LICENSE PLATE DETECTION & OCR SYSTEM",
             (40, 55),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.9,

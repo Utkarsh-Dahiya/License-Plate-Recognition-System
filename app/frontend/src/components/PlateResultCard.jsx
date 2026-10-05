@@ -12,12 +12,31 @@ function fmtPercent(val) {
   return `${(Number(val) * 100).toFixed(1)}%`
 }
 
-/** Maps the backend's `validation` vocabulary to plain-language wording. */
-const VALIDATION_LABEL = {
-  INDIAN_PLATE: 'Matches Indian plate pattern',
-  POSSIBLE_INDIAN_PLATE: 'Possible Indian plate',
-  UNVERIFIED: 'Format unverified',
-  OCR_FAILED: 'Text not read',
+/**
+ * Format verdict, derived from the backend's STRICT validation layer.
+ *
+ * The legacy `validation` field (`indian_plate_score`) is a pure
+ * character-shape heuristic: it takes no OCR confidence and scores any
+ * plate-shaped blob highly (e.g. "EM01B21650" scores 90/100 even at 12.6%
+ * OCR confidence). `strict_format` is the layer that knows real Indian
+ * issuance rules — a real RTO state code plus a valid district/series — so
+ * it is what the user-facing verdict is based on.
+ *
+ * Never falls back to the legacy field, and never invents a verdict: an
+ * absent `strict_format` is reported as "Not reported".
+ */
+function formatVerdict(plate) {
+  if (plate.strict_format === true) return 'Strict Indian format'
+  if (plate.strict_format === false) return 'Not a strict Indian format'
+  return null
+}
+
+/** Plain-language wording for the state the backend actually resolved. */
+function stateLabel(plate) {
+  if (plate.state_code && plate.state_name) return `${plate.state_code} · ${plate.state_name}`
+  if (plate.state_code) return plate.state_code
+  if (plate.state_name) return plate.state_name
+  return null
 }
 
 function MetricRow({ label, value, tone = 'default' }) {
@@ -192,8 +211,10 @@ export default function PlateResultCard({
         <IndianPlateCard plate={plate} isSelected={isSelected} />
       </div>
 
-      {/* Registration detail (only fields the API actually returned) */}
-      {(plate.state_code || plate.state_name) && (
+      {/* Registration detail. The row renders whenever the backend returned a
+          format verdict (including a negative one) so a rejected read is
+          visibly explained instead of silently hidden. */}
+      {(plate.state_code || plate.state_name || !isStrict) && (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px]">
           {plate.state_code && (
             <span className="rounded border border-hairline bg-panel-raised px-2 py-0.5 font-mono font-semibold text-signal">
@@ -210,7 +231,7 @@ export default function PlateResultCard({
           >
             {isStrict
               ? 'Strict Indian format'
-              : VALIDATION_LABEL[plate.validation] || 'Non-standard format'}
+              : 'Non-standard format'}
           </span>
         </div>
       )}
@@ -246,13 +267,13 @@ export default function PlateResultCard({
           <div className="border-t border-hairline-soft pt-1">
             <MetricRow label="Combined confidence" value={finalConf} tone="accent" />
           </div>
-          <MetricRow label="Validation score" value={validationScore} />
-          <MetricRow
-            label="Format check"
-            value={
-              isStrict ? 'Strict Indian format' : VALIDATION_LABEL[plate.validation] || null
-            }
-          />
+          {/* The raw heuristic score is still surfaced (it is a real API field) but
+              labelled so it cannot be mistaken for trustworthiness: it is a
+              character-shape score with no OCR-confidence input, and it is
+              deliberately NOT what the Format check verdict is based on. */}
+          <MetricRow label="Format shape score" value={validationScore} />
+          <MetricRow label="Format check" value={formatVerdict(plate)} />
+          <MetricRow label="State" value={stateLabel(plate)} />
           <div className="flex items-center justify-between gap-2">
             <span className="text-ink-dim">Quality band</span>
             <StatusBadge status={band} />

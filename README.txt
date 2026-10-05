@@ -1,4 +1,4 @@
-# License Vision AI — Image + Video Testing (offline scripts)
+# License Plate Detection & OCR System — Image + Video Testing (offline scripts)
 
 These notes describe the **root Python scripts**, not the FastAPI/React app in `app/`.
 The dashboard does **not** re-run these scripts on load.
