@@ -1,0 +1,135 @@
+{
+  "approaches": {
+    "Baseline (production)": {
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.0769,
+      "fail_rate": 0.0,
+      "wrong_rate": 1.0
+    },
+    "Best preprocessing (per-sample oracle)": {
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.2253,
+      "fail_rate": 0.0,
+      "wrong_rate": 1.0
+    },
+    "Multi-pass (any-pass oracle)": {
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.30145,
+      "fail_rate": 1.0,
+      "wrong_rate": 1.0
+    },
+    "Consensus (char-aware vote)": {
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.15385,
+      "fail_rate": 0.0,
+      "wrong_rate": 1.0
+    },
+    "Rank: char-confidence": {
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.1154,
+      "fail_rate": 0.0,
+      "wrong_rate": 1.0
+    },
+    "Rank: consensus": {
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.1154,
+      "fail_rate": 0.0,
+      "wrong_rate": 1.0
+    }
+  },
+  "variant_rows": [
+    {
+      "variant": "A_original",
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.18685000000000002,
+      "fail_rate": 0.0,
+      "avg_latency_ms": 71.6
+    },
+    {
+      "variant": "B_clahe",
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.0769,
+      "fail_rate": 0.0,
+      "avg_latency_ms": 71.6
+    },
+    {
+      "variant": "C_gray_contrast",
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.15385,
+      "fail_rate": 0.0,
+      "avg_latency_ms": 77.6
+    },
+    {
+      "variant": "D_otsu",
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.0769,
+      "fail_rate": 0.0,
+      "avg_latency_ms": 71.5
+    },
+    {
+      "variant": "E_adaptive",
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.1154,
+      "fail_rate": 0.0,
+      "avg_latency_ms": 85.9
+    },
+    {
+      "variant": "F_denoise_otsu",
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.0769,
+      "fail_rate": 0.0,
+      "avg_latency_ms": 78.9
+    },
+    {
+      "variant": "G_up_gray",
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.1154,
+      "fail_rate": 0.0,
+      "avg_latency_ms": 73.2
+    },
+    {
+      "variant": "H_up_clahe",
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.1154,
+      "fail_rate": 0.0,
+      "avg_latency_ms": 70.3
+    },
+    {
+      "variant": "I_up_adaptive",
+      "n": 2,
+      "exact_rate": 0.0,
+      "char_acc": 0.1154,
+      "fail_rate": 0.0,
+      "avg_latency_ms": 81.4
+    }
+  ],
+  "val_pool": {
+    "n_crops": 145,
+    "empty_ocr_rate": 0.0,
+    "char_conf_available_rate": 1.0,
+    "avg_distinct_candidates": 1.0,
+    "latency": {
+      "avg": 72.8,
+      "p50": 61.0,
+      "p95": 131.9
+    }
+  },
+  "graded_ids": [
+    "0034",
+    "0333"
+  ]
+}

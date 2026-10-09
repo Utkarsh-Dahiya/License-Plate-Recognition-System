@@ -1,0 +1,439 @@
+{
+  "instructions": "For each index below, set 'text' to the EXACT plate text you read from review_sheets/sheet_*.png, or 'unreadable': true if not readable. The 'hint' is the system OCR output and is NOT truth. When done, run: python diagnostics/ocr_benchmark/apply_transcript.py",
+  "answers": {
+    "0": {
+      "id": "R001",
+      "crop_path": "../audit/crops/N184__gt0_detp1.png",
+      "hint": "6J06J09759",
+      "text": "",
+      "unreadable": false
+    },
+    "1": {
+      "id": "R002",
+      "crop_path": "../audit/crops/Cars114__gt0_detp2.png",
+      "hint": "3323",
+      "text": "",
+      "unreadable": false
+    },
+    "2": {
+      "id": "R003",
+      "crop_path": "../audit/crops/N143__gt0_detp1.png",
+      "hint": "2632",
+      "text": "",
+      "unreadable": false
+    },
+    "3": {
+      "id": "R004",
+      "crop_path": "../audit/crops/Cars211__gt0_detp3.png",
+      "hint": "FG5O22",
+      "text": "",
+      "unreadable": false
+    },
+    "4": {
+      "id": "R005",
+      "crop_path": "../audit/crops/Cars312__gt0_detp1.png",
+      "hint": "PUIBBES",
+      "text": "",
+      "unreadable": false
+    },
+    "5": {
+      "id": "R006",
+      "crop_path": "../audit/crops/Cars50__gt0_detp1.png",
+      "hint": "PUIBBES",
+      "text": "",
+      "unreadable": false
+    },
+    "6": {
+      "id": "R007",
+      "crop_path": "../audit/crops/N171__gt0_detp1.png",
+      "hint": "MHHOIAE8O1ZL",
+      "text": "",
+      "unreadable": false
+    },
+    "7": {
+      "id": "R008",
+      "crop_path": "../audit/crops/N27__gt0_detp1.png",
+      "hint": "T7T4",
+      "text": "",
+      "unreadable": false
+    },
+    "8": {
+      "id": "R009",
+      "crop_path": "../audit/crops/N223__gt0_detp1.png",
+      "hint": "V42R2697",
+      "text": "",
+      "unreadable": false
+    },
+    "9": {
+      "id": "R010",
+      "crop_path": "../audit/crops/Cars266__gt5_gtboxgt.png",
+      "hint": "",
+      "text": "",
+      "unreadable": false
+    },
+    "10": {
+      "id": "R011",
+      "crop_path": "../audit/crops/Cars6__gt0_detp1.png",
+      "hint": "7802R14N",
+      "text": "",
+      "unreadable": false
+    },
+    "11": {
+      "id": "R012",
+      "crop_path": "../audit/crops/Cars176__gt0_detp1.png",
+      "hint": "COCTIE447HEA",
+      "text": "",
+      "unreadable": false
+    },
+    "12": {
+      "id": "R013",
+      "crop_path": "../audit/crops/Cars385__gt0_detp1.png",
+      "hint": "COCTIE447HEA",
+      "text": "",
+      "unreadable": false
+    },
+    "13": {
+      "id": "R014",
+      "crop_path": "../audit/crops/Cars219__gt0_detp1.png",
+      "hint": "KA03M6",
+      "text": "",
+      "unreadable": false
+    },
+    "14": {
+      "id": "R015",
+      "crop_path": "../audit/crops/Cars128__gt0_detp1.png",
+      "hint": "OXG5AND",
+      "text": "",
+      "unreadable": false
+    },
+    "15": {
+      "id": "R016",
+      "crop_path": "../audit/crops/N219__gt0_detp1.png",
+      "hint": "IHI2DE1433",
+      "text": "",
+      "unreadable": false
+    },
+    "16": {
+      "id": "R017",
+      "crop_path": "../audit/crops/N92__gt0_detp1.png",
+      "hint": "1OAW2814",
+      "text": "",
+      "unreadable": false
+    },
+    "17": {
+      "id": "R018",
+      "crop_path": "../audit/crops/Cars102__gt0_detp1.png",
+      "hint": "685611361",
+      "text": "",
+      "unreadable": false
+    },
+    "18": {
+      "id": "R019",
+      "crop_path": "../audit/crops/N126__gt0_detp1.png",
+      "hint": "HPSX400",
+      "text": "",
+      "unreadable": false
+    },
+    "19": {
+      "id": "R020",
+      "crop_path": "../audit/crops/N34__gt0_detp1.png",
+      "hint": "LK015L",
+      "text": "",
+      "unreadable": false
+    },
+    "20": {
+      "id": "R021",
+      "crop_path": "../audit/crops/N3__gt0_detp1.png",
+      "hint": "PQFDT4A",
+      "text": "",
+      "unreadable": false
+    },
+    "21": {
+      "id": "R022",
+      "crop_path": "../audit/crops/N70__gt0_detp1.png",
+      "hint": "KA03ABI3380",
+      "text": "",
+      "unreadable": false
+    },
+    "22": {
+      "id": "R023",
+      "crop_path": "../audit/crops/N166__gt0_detp1.png",
+      "hint": "KL12G7531",
+      "text": "",
+      "unreadable": false
+    },
+    "23": {
+      "id": "R024",
+      "crop_path": "../audit/crops/Cars361__gt0_detp1.png",
+      "hint": "MPEACHW",
+      "text": "",
+      "unreadable": false
+    },
+    "24": {
+      "id": "R025",
+      "crop_path": "../audit/crops/N177__gt0_detp1.png",
+      "hint": "MH14TCF459",
+      "text": "",
+      "unreadable": false
+    },
+    "25": {
+      "id": "R026",
+      "crop_path": "../audit/crops/N129__gt0_detp1.png",
+      "hint": "DL7CN5617",
+      "text": "",
+      "unreadable": false
+    },
+    "26": {
+      "id": "R027",
+      "crop_path": "../audit/crops/N212__gt0_detp1.png",
+      "hint": "MPBOBAGIT18979",
+      "text": "",
+      "unreadable": false
+    },
+    "27": {
+      "id": "R028",
+      "crop_path": "../audit/crops/Cars386__gt0_detp1.png",
+      "hint": "LAB44887",
+      "text": "",
+      "unreadable": false
+    },
+    "28": {
+      "id": "R029",
+      "crop_path": "../audit/crops/N74__gt0_detp1.png",
+      "hint": "MH12JC2813",
+      "text": "",
+      "unreadable": false
+    },
+    "29": {
+      "id": "R030",
+      "crop_path": "../audit/crops/Cars147__gt0_detp1.png",
+      "hint": "KL01CA2555",
+      "text": "",
+      "unreadable": false
+    },
+    "30": {
+      "id": "R031",
+      "crop_path": "../audit/crops/Cars80__gt0_detp1.png",
+      "hint": "07A401",
+      "text": "",
+      "unreadable": false
+    },
+    "31": {
+      "id": "R032",
+      "crop_path": "../audit/crops/N135__gt0_detp1.png",
+      "hint": "GJW115A1138",
+      "text": "",
+      "unreadable": false
+    },
+    "32": {
+      "id": "R033",
+      "crop_path": "../audit/crops/N56__gt0_detp1.png",
+      "hint": "JDL3CAY9324",
+      "text": "",
+      "unreadable": false
+    },
+    "33": {
+      "id": "R034",
+      "crop_path": "../audit/crops/Cars318__gt0_detp1.png",
+      "hint": "ALR486",
+      "text": "",
+      "unreadable": false
+    },
+    "34": {
+      "id": "R035",
+      "crop_path": "../audit/crops/Cars48__gt0_detp1.png",
+      "hint": "ALR486",
+      "text": "",
+      "unreadable": false
+    },
+    "35": {
+      "id": "R036",
+      "crop_path": "../audit/crops/Cars138__gt0_detp1.png",
+      "hint": "TN02BL",
+      "text": "",
+      "unreadable": false
+    },
+    "36": {
+      "id": "R037",
+      "crop_path": "../audit/crops/N65__gt0_detp1.png",
+      "hint": "HR26BU0375",
+      "text": "",
+      "unreadable": false
+    },
+    "37": {
+      "id": "R038",
+      "crop_path": "../audit/crops/N116__gt0_detp1.png",
+      "hint": "HR26DA0471",
+      "text": "",
+      "unreadable": false
+    },
+    "38": {
+      "id": "R039",
+      "crop_path": "../audit/crops/Cars259__gt0_detp1.png",
+      "hint": "MH20EE7598",
+      "text": "",
+      "unreadable": false
+    },
+    "39": {
+      "id": "R040",
+      "crop_path": "../audit/crops/N67__gt0_detp1.png",
+      "hint": "KL43B2344",
+      "text": "",
+      "unreadable": false
+    },
+    "40": {
+      "id": "R041",
+      "crop_path": "../audit/crops/Cars212__gt0_detp1.png",
+      "hint": "KL65H4383",
+      "text": "",
+      "unreadable": false
+    },
+    "41": {
+      "id": "R042",
+      "crop_path": "../audit/crops/Cars378__gt0_detp1.png",
+      "hint": "",
+      "text": "",
+      "unreadable": false
+    },
+    "42": {
+      "id": "R043",
+      "crop_path": "../audit/crops/N102__gt0_detp1.png",
+      "hint": "MF02BM5048",
+      "text": "",
+      "unreadable": false
+    },
+    "43": {
+      "id": "R044",
+      "crop_path": "../audit/crops/N148__gt0_detp1.png",
+      "hint": "TCH300",
+      "text": "",
+      "unreadable": false
+    },
+    "44": {
+      "id": "R045",
+      "crop_path": "../audit/crops/N181__gt0_detp1.png",
+      "hint": "BLII55",
+      "text": "",
+      "unreadable": false
+    },
+    "45": {
+      "id": "R046",
+      "crop_path": "../audit/crops/Cars203__gt0_detp1.png",
+      "hint": "CZI7KOD",
+      "text": "",
+      "unreadable": false
+    },
+    "46": {
+      "id": "R047",
+      "crop_path": "../audit/crops/Cars74__gt0_detp1.png",
+      "hint": "CZI7KOD",
+      "text": "",
+      "unreadable": false
+    },
+    "47": {
+      "id": "R048",
+      "crop_path": "../audit/crops/N49__gt0_detp1.png",
+      "hint": "HR26CH3604",
+      "text": "",
+      "unreadable": false
+    },
+    "48": {
+      "id": "R049",
+      "crop_path": "../audit/crops/N47__gt0_detp1.png",
+      "hint": "UHR99HAMEXP4575",
+      "text": "",
+      "unreadable": false
+    },
+    "49": {
+      "id": "R050",
+      "crop_path": "../audit/crops/N112__gt0_detp1.png",
+      "hint": "FMH20EE7598",
+      "text": "",
+      "unreadable": false
+    },
+    "50": {
+      "id": "R051",
+      "crop_path": "../audit/crops/N44__gt0_detp1.png",
+      "hint": "KA514J8156",
+      "text": "",
+      "unreadable": false
+    },
+    "51": {
+      "id": "R052",
+      "crop_path": "../audit/crops/N35__gt0_detp1.png",
+      "hint": "IWJ87T1",
+      "text": "",
+      "unreadable": false
+    },
+    "52": {
+      "id": "R053",
+      "crop_path": "../audit/crops/N72__gt0_detp1.png",
+      "hint": "MHOLDH8351",
+      "text": "",
+      "unreadable": false
+    },
+    "53": {
+      "id": "R054",
+      "crop_path": "../audit/crops/Cars252__gt0_detp1.png",
+      "hint": "DAN54P",
+      "text": "",
+      "unreadable": false
+    },
+    "54": {
+      "id": "R055",
+      "crop_path": "../audit/crops/N214__gt0_detp1.png",
+      "hint": "MHI4TCEAJ",
+      "text": "",
+      "unreadable": false
+    },
+    "55": {
+      "id": "R056",
+      "crop_path": "../audit/crops/Cars382__gt0_detp1.png",
+      "hint": "CRAIG",
+      "text": "",
+      "unreadable": false
+    },
+    "56": {
+      "id": "R057",
+      "crop_path": "../audit/crops/Cars208__gt0_detp1.png",
+      "hint": "",
+      "text": "",
+      "unreadable": false
+    },
+    "57": {
+      "id": "R058",
+      "crop_path": "../audit/crops/Cars172__gt0_detp1.png",
+      "hint": "LK157",
+      "text": "",
+      "unreadable": false
+    },
+    "58": {
+      "id": "R059",
+      "crop_path": "../audit/crops/Cars201__gt0_detp1.png",
+      "hint": "LR33TE",
+      "text": "",
+      "unreadable": false
+    },
+    "59": {
+      "id": "R060",
+      "crop_path": "../audit/crops/Cars412__gt0_detp1.png",
+      "hint": "LR33TE",
+      "text": "",
+      "unreadable": false
+    },
+    "60": {
+      "id": "V0034",
+      "crop_path": "../../batch_results/0034_plate.jpg",
+      "hint": "",
+      "text": "",
+      "unreadable": false
+    },
+    "61": {
+      "id": "V0333",
+      "crop_path": "../../batch_results/0333_plate.jpg",
+      "hint": "",
+      "text": "",
+      "unreadable": false
+    }
+  }
+}

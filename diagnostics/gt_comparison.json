@@ -1,0 +1,162 @@
+{
+  "generated": "2026-10-07T17:30:30+00:00",
+  "fuzzy_threshold": 0.8,
+  "tiers": "1=CLAHE 2=OTSU 3=denoise (diagnose_plates cascade, no band split)",
+  "plates": {
+    "0034": {
+      "gt_text": "9M17408FV1232",
+      "gt_lines": {
+        "top": "9M17408",
+        "bottom": "FV1232"
+      },
+      "gt_alternatives": [
+        "8M17408",
+        "9M174U8",
+        "9M1740B"
+      ],
+      "gt_readable": true,
+      "gt_confidence": {
+        "top": "medium",
+        "bottom": "high"
+      },
+      "candidates": [
+        {
+          "tier": 1,
+          "tier_name": "CLAHE",
+          "text": "F232",
+          "conf": 0.245,
+          "gt_ratio": 0.8,
+          "strict_valid": false
+        },
+        {
+          "tier": 2,
+          "tier_name": "OTSU",
+          "text": "M2",
+          "conf": 0.3353,
+          "gt_ratio": 0.2667,
+          "strict_valid": false
+        },
+        {
+          "tier": 3,
+          "tier_name": "denoise",
+          "text": "N23",
+          "conf": 0.0839,
+          "gt_ratio": 0.4444,
+          "strict_valid": false
+        }
+      ],
+      "best_text": "F232",
+      "best_ratio": 0.8,
+      "verdict": "FUZZY_MATCH",
+      "cascade_ms": 273.9,
+      "batch_pipeline": {
+        "image": "Cars135.png",
+        "plate_text": "F1232",
+        "ocr_confidence": "0.7734",
+        "status": "SUCCESS",
+        "best_ratio": 0.9091,
+        "verdict": "FUZZY_MATCH"
+      }
+    },
+    "0067": {
+      "gt_text": null,
+      "gt_lines": null,
+      "gt_alternatives": [],
+      "gt_readable": false,
+      "gt_confidence": {
+        "overall": "none"
+      },
+      "candidates": [
+        {
+          "tier": 1,
+          "tier_name": "CLAHE",
+          "text": "KAA",
+          "conf": 0.0091,
+          "gt_ratio": 0.0,
+          "strict_valid": false
+        },
+        {
+          "tier": 2,
+          "tier_name": "OTSU",
+          "text": "45",
+          "conf": 0.0381,
+          "gt_ratio": 0.0,
+          "strict_valid": false
+        },
+        {
+          "tier": 3,
+          "tier_name": "denoise",
+          "text": "A",
+          "conf": 0.1558,
+          "gt_ratio": 0.0,
+          "strict_valid": false
+        }
+      ],
+      "best_text": "",
+      "best_ratio": 0.0,
+      "verdict": "GT_UNREADABLE",
+      "cascade_ms": 215.0,
+      "batch_pipeline": {
+        "image": "Cars174.png",
+        "plate_text": "AC",
+        "ocr_confidence": "0.0043",
+        "status": "SUCCESS",
+        "best_ratio": 0.0,
+        "verdict": "GT_UNREADABLE"
+      }
+    },
+    "0333": {
+      "gt_text": "EHK1642",
+      "gt_lines": {
+        "main": "EHK1642"
+      },
+      "gt_alternatives": [
+        "FMK1642",
+        "FHK1642",
+        "EHK164D"
+      ],
+      "gt_readable": true,
+      "gt_confidence": {
+        "main": "low"
+      },
+      "candidates": [
+        {
+          "tier": 1,
+          "tier_name": "CLAHE",
+          "text": "LX",
+          "conf": 0.2614,
+          "gt_ratio": 0.0,
+          "strict_valid": false
+        },
+        {
+          "tier": 2,
+          "tier_name": "OTSU",
+          "text": "IA",
+          "conf": 0.0696,
+          "gt_ratio": 0.0,
+          "strict_valid": false
+        },
+        {
+          "tier": 3,
+          "tier_name": "denoise",
+          "text": "WITFA",
+          "conf": 0.0164,
+          "gt_ratio": 0.1667,
+          "strict_valid": false
+        }
+      ],
+      "best_text": "WITFA",
+      "best_ratio": 0.1667,
+      "verdict": "MISMATCH",
+      "cascade_ms": 200.2,
+      "batch_pipeline": {
+        "image": "Cars85.png",
+        "plate_text": "",
+        "ocr_confidence": "0",
+        "status": "OCR_FAILED",
+        "best_ratio": 0.0,
+        "verdict": "NO_OUTPUT"
+      }
+    }
+  }
+}

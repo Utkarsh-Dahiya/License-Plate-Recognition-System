@@ -1,0 +1,576 @@
+{
+  "generated_at": "2026-10-08T23:12:47",
+  "note": "Only 3 human-verified text-GT plates exist; exact-match metrics are computed on those. GJ08DJ3136 is not in data.",
+  "per_sample": {
+    "0034": {
+      "scene": "Cars135",
+      "gt_text": "9M17408FV1232",
+      "readable": true,
+      "layout": "two-line",
+      "crop_w": 59,
+      "crop_h": 27,
+      "aspect": 2.185,
+      "baseline": {
+        "final_text": "34218",
+        "final_conf": 0.2258,
+        "exact": false,
+        "char_acc": 0.1538,
+        "latency": 0.1121
+      },
+      "variants": {
+        "A_original": {
+          "text": "342408",
+          "conf": 0.0919,
+          "exact": false,
+          "char_acc": 0.2308,
+          "fail": false,
+          "lat": 0.0526
+        },
+        "B_clahe": {
+          "text": "34218",
+          "conf": 0.2258,
+          "exact": false,
+          "char_acc": 0.1538,
+          "fail": false,
+          "lat": 0.0529
+        },
+        "C_gray_contrast": {
+          "text": "342132",
+          "conf": 0.2255,
+          "exact": false,
+          "char_acc": 0.3077,
+          "fail": false,
+          "lat": 0.0661
+        },
+        "D_otsu": {
+          "text": "2443438",
+          "conf": 0.3275,
+          "exact": false,
+          "char_acc": 0.1538,
+          "fail": false,
+          "lat": 0.06
+        },
+        "E_adaptive": {
+          "text": "FIZ32",
+          "conf": 0.4829,
+          "exact": false,
+          "char_acc": 0.2308,
+          "fail": false,
+          "lat": 0.0567
+        },
+        "F_denoise_otsu": {
+          "text": "2443438",
+          "conf": 0.4022,
+          "exact": false,
+          "char_acc": 0.1538,
+          "fail": false,
+          "lat": 0.0689
+        },
+        "G_up_gray": {
+          "text": "342408",
+          "conf": 0.0886,
+          "exact": false,
+          "char_acc": 0.2308,
+          "fail": false,
+          "lat": 0.0603
+        },
+        "H_up_clahe": {
+          "text": "34212",
+          "conf": 0.1647,
+          "exact": false,
+          "char_acc": 0.2308,
+          "fail": false,
+          "lat": 0.0482
+        },
+        "I_up_adaptive": {
+          "text": "ZI232",
+          "conf": 0.3298,
+          "exact": false,
+          "char_acc": 0.2308,
+          "fail": false,
+          "lat": 0.0489
+        }
+      },
+      "multipass": {
+        "gt_produced": false,
+        "gt_sim_best": 0.4211,
+        "n_distinct": 7,
+        "n_raw": 9,
+        "latency": 0.5648,
+        "raw_list": [
+          [
+            "A_original",
+            "342408",
+            0.0919
+          ],
+          [
+            "B_clahe",
+            "34218",
+            0.2258
+          ],
+          [
+            "C_gray_contrast",
+            "342132",
+            0.2255
+          ],
+          [
+            "D_otsu",
+            "2443438",
+            0.3275
+          ],
+          [
+            "E_adaptive",
+            "FIZ32",
+            0.4829
+          ],
+          [
+            "F_denoise_otsu",
+            "2443438",
+            0.4022
+          ],
+          [
+            "G_up_gray",
+            "342408",
+            0.0886
+          ],
+          [
+            "H_up_clahe",
+            "34212",
+            0.1647
+          ],
+          [
+            "I_up_adaptive",
+            "ZI232",
+            0.3298
+          ]
+        ]
+      },
+      "consensus_and_ranking": {
+        "consensus": {
+          "text": "FI232",
+          "exact": false,
+          "char_acc": 0.3077
+        },
+        "rank_charconf": {
+          "text": "FIZ32",
+          "exact": false,
+          "char_acc": 0.2308
+        },
+        "rank_consensus": {
+          "text": "FIZ32",
+          "exact": false,
+          "char_acc": 0.2308
+        },
+        "n_distinct": 7,
+        "n_raw": 9
+      },
+      "char_confidence": {
+        "available": true,
+        "rows": [
+          {
+            "text": "34218",
+            "conf": 0.2258,
+            "chars": [
+              "3",
+              "4",
+              "2",
+              "1",
+              "8"
+            ],
+            "char_conf": [
+              0.5075,
+              0.9445,
+              0.9244,
+              0.5747,
+              0.7437
+            ],
+            "min_char": 0.5075
+          }
+        ]
+      }
+    },
+    "0067": {
+      "scene": "Cars174",
+      "gt_text": "",
+      "readable": false,
+      "layout": "unknown",
+      "crop_w": 24,
+      "crop_h": 9,
+      "aspect": 2.667,
+      "baseline": {
+        "final_text": "",
+        "final_conf": 0.0,
+        "exact": true,
+        "char_acc": 0.0,
+        "latency": 0.1037
+      },
+      "variants": {
+        "A_original": {
+          "text": "M",
+          "conf": 0.009,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.0833
+        },
+        "B_clahe": {
+          "text": "FS",
+          "conf": 0.0294,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.0884
+        },
+        "C_gray_contrast": {
+          "text": "FS",
+          "conf": 0.0113,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.1145
+        },
+        "D_otsu": {
+          "text": "RMS",
+          "conf": 0.3032,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.0784
+        },
+        "E_adaptive": {
+          "text": "AJ1P",
+          "conf": 0.0289,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.0873
+        },
+        "F_denoise_otsu": {
+          "text": "NS",
+          "conf": 0.0649,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.0797
+        },
+        "G_up_gray": {
+          "text": "K",
+          "conf": 0.0238,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.0545
+        },
+        "H_up_clahe": {
+          "text": "H5",
+          "conf": 0.0832,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.0616
+        },
+        "I_up_adaptive": {
+          "text": "60",
+          "conf": 0.3402,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.0526
+        }
+      },
+      "multipass": {
+        "gt_produced": false,
+        "gt_sim_best": 0.0,
+        "n_distinct": 8,
+        "n_raw": 9,
+        "latency": 0.9588,
+        "raw_list": [
+          [
+            "A_original",
+            "M",
+            0.009
+          ],
+          [
+            "B_clahe",
+            "FS",
+            0.0294
+          ],
+          [
+            "C_gray_contrast",
+            "FS",
+            0.0113
+          ],
+          [
+            "D_otsu",
+            "RMS",
+            0.3032
+          ],
+          [
+            "E_adaptive",
+            "AJ1P",
+            0.0289
+          ],
+          [
+            "F_denoise_otsu",
+            "NS",
+            0.0649
+          ],
+          [
+            "G_up_gray",
+            "K",
+            0.0238
+          ],
+          [
+            "H_up_clahe",
+            "H5",
+            0.0832
+          ],
+          [
+            "I_up_adaptive",
+            "60",
+            0.3402
+          ]
+        ]
+      },
+      "consensus_and_ranking": {
+        "consensus": {
+          "text": "60",
+          "exact": false,
+          "char_acc": 0.0
+        },
+        "rank_charconf": {
+          "text": "AJ1P",
+          "exact": false,
+          "char_acc": 0.0
+        },
+        "rank_consensus": {
+          "text": "AJ1P",
+          "exact": false,
+          "char_acc": 0.0
+        },
+        "n_distinct": 8,
+        "n_raw": 9
+      },
+      "char_confidence": {
+        "available": true,
+        "rows": [
+          {
+            "text": "FS",
+            "conf": 0.0294,
+            "chars": [
+              "F",
+              "S"
+            ],
+            "char_conf": [
+              0.1044,
+              0.791
+            ],
+            "min_char": 0.1044
+          }
+        ]
+      }
+    },
+    "0333": {
+      "scene": "Cars85",
+      "gt_text": "EHK1642",
+      "readable": true,
+      "layout": "single-line",
+      "crop_w": 61,
+      "crop_h": 17,
+      "aspect": 3.588,
+      "baseline": {
+        "final_text": "WU63GIY",
+        "final_conf": 0.1991,
+        "exact": false,
+        "char_acc": 0.0,
+        "latency": 0.1005
+      },
+      "variants": {
+        "A_original": {
+          "text": "U63G",
+          "conf": 0.6655,
+          "exact": false,
+          "char_acc": 0.1429,
+          "fail": false,
+          "lat": 0.0906
+        },
+        "B_clahe": {
+          "text": "WU63GIY",
+          "conf": 0.1991,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.0904
+        },
+        "C_gray_contrast": {
+          "text": "NU63CI",
+          "conf": 0.1079,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.089
+        },
+        "D_otsu": {
+          "text": "WU6JGTYI",
+          "conf": 0.3044,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.083
+        },
+        "E_adaptive": {
+          "text": "4VU63GTYI",
+          "conf": 0.2898,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.115
+        },
+        "F_denoise_otsu": {
+          "text": "WU6JGTYA",
+          "conf": 0.3128,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.089
+        },
+        "G_up_gray": {
+          "text": "MU63GLY",
+          "conf": 0.1905,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.0861
+        },
+        "H_up_clahe": {
+          "text": "U63GIY",
+          "conf": 0.248,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.0925
+        },
+        "I_up_adaptive": {
+          "text": "IVU63GTYL",
+          "conf": 0.4162,
+          "exact": false,
+          "char_acc": 0.0,
+          "fail": false,
+          "lat": 0.114
+        }
+      },
+      "multipass": {
+        "gt_produced": false,
+        "gt_sim_best": 0.1818,
+        "n_distinct": 9,
+        "n_raw": 9,
+        "latency": 1.1958,
+        "raw_list": [
+          [
+            "A_original",
+            "U63G",
+            0.6655
+          ],
+          [
+            "B_clahe",
+            "WU63GIY",
+            0.1991
+          ],
+          [
+            "C_gray_contrast",
+            "NU63CI",
+            0.1079
+          ],
+          [
+            "D_otsu",
+            "WU6JGTYI",
+            0.3044
+          ],
+          [
+            "E_adaptive",
+            "4VU63GTYI",
+            0.2898
+          ],
+          [
+            "F_denoise_otsu",
+            "WU6JGTYA",
+            0.3128
+          ],
+          [
+            "G_up_gray",
+            "MU63GLY",
+            0.1905
+          ],
+          [
+            "H_up_clahe",
+            "U63GIY",
+            0.248
+          ],
+          [
+            "I_up_adaptive",
+            "IVU63GTYL",
+            0.4162
+          ]
+        ]
+      },
+      "consensus_and_ranking": {
+        "consensus": {
+          "text": "WU63GIY",
+          "exact": false,
+          "char_acc": 0.0
+        },
+        "rank_charconf": {
+          "text": "IVU63GTYL",
+          "exact": false,
+          "char_acc": 0.0
+        },
+        "rank_consensus": {
+          "text": "WU63GIY",
+          "exact": false,
+          "char_acc": 0.0
+        },
+        "n_distinct": 9,
+        "n_raw": 9
+      },
+      "char_confidence": {
+        "available": true,
+        "rows": [
+          {
+            "text": "WU63GIY",
+            "conf": 0.1991,
+            "chars": [
+              "W",
+              "U",
+              "6",
+              "3",
+              "G",
+              "I",
+              "Y"
+            ],
+            "char_conf": [
+              0.2928,
+              0.9989,
+              0.9991,
+              0.957,
+              0.8696,
+              0.6712,
+              0.7245
+            ],
+            "min_char": 0.2928
+          }
+        ]
+      }
+    }
+  },
+  "val_pool_behavioral": {
+    "n_crops": 145,
+    "empty_ocr_rate": 0.0,
+    "char_conf_available_rate": 1.0,
+    "avg_distinct_candidates": 1.0,
+    "latency": {
+      "avg": 72.8,
+      "p50": 61.0,
+      "p95": 131.9
+    }
+  }
+}

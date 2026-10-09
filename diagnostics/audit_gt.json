@@ -1,0 +1,42 @@
+{
+  "created": "2026-10-03",
+  "method": "Manual transcription from labeled contact sheets (diagnostics/make_contact_sheets.py) at 160-640 px display height, plus contrast/sharpen enhanced variants (diagnostics/enhance_zoom.py). Sources are the diagnostics/gt_crops extractions; the scene originals (Cars135/Cars174/Cars85) are only 400 px wide, so no higher-resolution evidence exists. Confidence labels reflect legibility, not guesswork: unreadable is recorded as null rather than inferred.",
+  "plates": {
+    "0034": {
+      "scene": "Cars135",
+      "crop": "batch_results/0034_plate.jpg",
+      "crop_px": [62, 29],
+      "readable": true,
+      "layout": "two-line",
+      "lines": { "top": "9M17408", "bottom": "FV1232" },
+      "text": "9M17408FV1232",
+      "confidence": { "top": "medium", "bottom": "high" },
+      "alternatives": ["8M17408", "9M174U8", "9M1740B"],
+      "notes": "Top line is white-on-dark-blue: first glyph is stylized (9 vs 8) and glyph 6 is 0 vs U ambiguous; reads 9M17408. Bottom line FV1232 (dark on white) is unambiguous at 360-640 px zoom."
+    },
+    "0067": {
+      "scene": "Cars174",
+      "crop": "batch_results/0067_plate.jpg",
+      "crop_px": [22, 7],
+      "readable": false,
+      "layout": "unknown",
+      "lines": null,
+      "text": null,
+      "confidence": { "overall": "none" },
+      "alternatives": [],
+      "notes": "Crop is 22x7 px; at maximum contact-sheet magnification the plate shows six featureless dark blobs on the green pad. No character can be identified honestly, so GT is null rather than guessed."
+    },
+    "0333": {
+      "scene": "Cars85",
+      "crop": "batch_results/0333_plate.jpg",
+      "crop_px": [50, 15],
+      "readable": true,
+      "layout": "single-line",
+      "lines": { "main": "EHK1642" },
+      "text": "EHK1642",
+      "confidence": { "main": "low" },
+      "alternatives": ["FMK1642", "FHK1642", "EHK164D"],
+      "notes": "Tan plate, dark text, heavily blurred. First group: E/F + M/H + K; second group 1642 with last glyph 2 vs D ambiguous. Low-confidence GT."
+    }
+  }
+}

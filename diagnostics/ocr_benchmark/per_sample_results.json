@@ -1,0 +1,80 @@
+{
+  "0034": {
+    "gt_text": "9M17408FV1232",
+    "readable": true,
+    "layout": "two-line",
+    "crop": "59x27",
+    "aspect": 2.185,
+    "baseline_text": "34218",
+    "baseline_conf": 0.2258,
+    "baseline_exact": false,
+    "baseline_char_acc": 0.1538,
+    "multipass_gt_produced": false,
+    "multipass_best_sim": 0.4211,
+    "variants": {
+      "A_original": "342408",
+      "B_clahe": "34218",
+      "C_gray_contrast": "342132",
+      "D_otsu": "2443438",
+      "E_adaptive": "FIZ32",
+      "F_denoise_otsu": "2443438",
+      "G_up_gray": "342408",
+      "H_up_clahe": "34212",
+      "I_up_adaptive": "ZI232"
+    },
+    "consensus": "FI232",
+    "rank_charconf": "FIZ32"
+  },
+  "0067": {
+    "gt_text": "",
+    "readable": false,
+    "layout": "unknown",
+    "crop": "24x9",
+    "aspect": 2.667,
+    "baseline_text": "",
+    "baseline_conf": 0.0,
+    "baseline_exact": true,
+    "baseline_char_acc": 0.0,
+    "multipass_gt_produced": false,
+    "multipass_best_sim": 0.0,
+    "variants": {
+      "A_original": "M",
+      "B_clahe": "FS",
+      "C_gray_contrast": "FS",
+      "D_otsu": "RMS",
+      "E_adaptive": "AJ1P",
+      "F_denoise_otsu": "NS",
+      "G_up_gray": "K",
+      "H_up_clahe": "H5",
+      "I_up_adaptive": "60"
+    },
+    "consensus": "60",
+    "rank_charconf": "AJ1P"
+  },
+  "0333": {
+    "gt_text": "EHK1642",
+    "readable": true,
+    "layout": "single-line",
+    "crop": "61x17",
+    "aspect": 3.588,
+    "baseline_text": "WU63GIY",
+    "baseline_conf": 0.1991,
+    "baseline_exact": false,
+    "baseline_char_acc": 0.0,
+    "multipass_gt_produced": false,
+    "multipass_best_sim": 0.1818,
+    "variants": {
+      "A_original": "U63G",
+      "B_clahe": "WU63GIY",
+      "C_gray_contrast": "NU63CI",
+      "D_otsu": "WU6JGTYI",
+      "E_adaptive": "4VU63GTYI",
+      "F_denoise_otsu": "WU6JGTYA",
+      "G_up_gray": "MU63GLY",
+      "H_up_clahe": "U63GIY",
+      "I_up_adaptive": "IVU63GTYL"
+    },
+    "consensus": "WU63GIY",
+    "rank_charconf": "IVU63GTYL"
+  }
+}

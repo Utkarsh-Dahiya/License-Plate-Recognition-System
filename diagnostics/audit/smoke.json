@@ -1,0 +1,631 @@
+{
+ "meta": {
+  "generated": "2026-10-07T20:06:10.675482+00:00",
+  "pool": "val",
+  "conf_threshold": 0.2,
+  "iou_match": 0.5,
+  "max_infer_side": 1280,
+  "images": 3,
+  "note": "production run_detection_on_image, unmodified; raw EasyOCR strings captured via read-only recognize() wrapper"
+ },
+ "images": [
+  {
+   "image": "Cars102.png",
+   "split_pool": "val",
+   "orig_size": [
+    350,
+    263
+   ],
+   "service_size": [
+    350,
+    263
+   ],
+   "gt_boxes_service": [
+    [
+     66,
+     147,
+     322,
+     199
+    ]
+   ],
+   "gt_match": [
+    {
+     "gt_index": 0,
+     "gt_box": [
+      66,
+      147,
+      322,
+      199
+     ],
+     "matched": true,
+     "matched_plate_id": 1,
+     "best_iou": 0.7017
+    }
+   ],
+   "plates": [
+    {
+     "plate_id": 1,
+     "bbox": [
+      15,
+      141,
+      326,
+      202
+     ],
+     "raw_bbox": [
+      15,
+      141,
+      326,
+      202
+     ],
+     "yolo_confidence": 0.9746,
+     "ocr_text": "685611361",
+     "ocr_confidence": 0.9207,
+     "validation_score": 55,
+     "validation": "POSSIBLE_INDIAN_PLATE",
+     "final_confidence": 0.7724,
+     "status": "REVIEW",
+     "strict_format": false,
+     "state_code": null,
+     "candidates": {
+      "tier1": [
+       {
+        "text": "685611361",
+        "conf": 0.9207
+       }
+      ]
+     },
+     "selected": {
+      "text": "685611361",
+      "ocr_confidence": 0.9207,
+      "votes": 1,
+      "format_score": 55
+     },
+     "matched_gt_index": 0,
+     "is_fp": false
+    }
+   ],
+   "raw_passes": [
+    {
+     "text": "685611361",
+     "conf": 0.9207,
+     "shape": [
+      173,
+      762
+     ],
+     "attributed_to": [
+      1
+     ]
+    }
+   ],
+   "crops": [
+    {
+     "file": "Cars102__gt0_detp1.png",
+     "gt_index": 0,
+     "source": "det",
+     "plate_id": 1,
+     "bbox": [
+      15,
+      141,
+      326,
+      202
+     ],
+     "w": 311,
+     "h": 61,
+     "aspect": 5.098
+    }
+   ],
+   "plates_detected": 1,
+   "elapsed_ms": 1437.7
+  },
+  {
+   "image": "Cars108.png",
+   "split_pool": "val",
+   "orig_size": [
+    442,
+    333
+   ],
+   "service_size": [
+    442,
+    333
+   ],
+   "gt_boxes_service": [
+    [
+     157,
+     216,
+     276,
+     248
+    ]
+   ],
+   "gt_match": [
+    {
+     "gt_index": 0,
+     "gt_box": [
+      157,
+      216,
+      276,
+      248
+     ],
+     "matched": true,
+     "matched_plate_id": 1,
+     "best_iou": 0.6996
+    }
+   ],
+   "plates": [
+    {
+     "plate_id": 1,
+     "bbox": [
+      163,
+      223,
+      274,
+      247
+     ],
+     "raw_bbox": [
+      163,
+      223,
+      274,
+      247
+     ],
+     "yolo_confidence": 0.8293,
+     "ocr_text": "FMHO14Y8866",
+     "ocr_confidence": 0.3053,
+     "validation_score": 90,
+     "validation": "INDIAN_PLATE",
+     "final_confidence": 0.5432,
+     "status": "REVIEW",
+     "strict_format": false,
+     "state_code": null,
+     "candidates": {
+      "tier1": [
+       {
+        "text": "FMHO14Y8866",
+        "conf": 0.3053
+       }
+      ],
+      "tier2": [
+       {
+        "text": "1MHOIAV8866",
+        "conf": 0.2886
+       }
+      ],
+      "tier3": [
+       {
+        "text": "1MHOIAV8866",
+        "conf": 0.5976
+       }
+      ]
+     },
+     "selected": {
+      "text": "FMHO14Y8866",
+      "ocr_confidence": 0.3053,
+      "votes": 1,
+      "format_score": 90
+     },
+     "matched_gt_index": 0,
+     "is_fp": false
+    }
+   ],
+   "raw_passes": [
+    {
+     "text": "FMHO14Y8866",
+     "conf": 0.3053,
+     "shape": [
+      108,
+      650
+     ],
+     "attributed_to": [
+      1
+     ]
+    },
+    {
+     "text": "1MHOIAV8866",
+     "conf": 0.2886,
+     "shape": [
+      108,
+      650
+     ],
+     "attributed_to": [
+      1
+     ]
+    },
+    {
+     "text": "1MHOIAV8866",
+     "conf": 0.5976,
+     "shape": [
+      108,
+      650
+     ],
+     "attributed_to": [
+      1
+     ]
+    }
+   ],
+   "crops": [
+    {
+     "file": "Cars108__gt0_detp1.png",
+     "gt_index": 0,
+     "source": "det",
+     "plate_id": 1,
+     "bbox": [
+      163,
+      223,
+      274,
+      247
+     ],
+     "w": 111,
+     "h": 24,
+     "aspect": 4.625
+    }
+   ],
+   "plates_detected": 1,
+   "elapsed_ms": 1439.3
+  },
+  {
+   "image": "Cars114.png",
+   "split_pool": "val",
+   "orig_size": [
+    500,
+    300
+   ],
+   "service_size": [
+    500,
+    300
+   ],
+   "gt_boxes_service": [
+    [
+     7,
+     15,
+     493,
+     255
+    ]
+   ],
+   "gt_match": [
+    {
+     "gt_index": 0,
+     "gt_box": [
+      7,
+      15,
+      493,
+      255
+     ],
+     "matched": true,
+     "matched_plate_id": 2,
+     "best_iou": 0.8368
+    }
+   ],
+   "plates": [
+    {
+     "plate_id": 1,
+     "bbox": [
+      18,
+      16,
+      497,
+      183
+     ],
+     "raw_bbox": [
+      18,
+      16,
+      497,
+      183
+     ],
+     "yolo_confidence": 0.9533,
+     "ocr_text": "LAP29BR",
+     "ocr_confidence": 0.1939,
+     "validation_score": 100,
+     "validation": "INDIAN_PLATE",
+     "final_confidence": 0.5163,
+     "status": "REVIEW",
+     "strict_format": false,
+     "state_code": null,
+     "candidates": {
+      "tier1": [
+       {
+        "text": "LAP29BR",
+        "conf": 0.1939
+       }
+      ],
+      "tier6": [
+       {
+        "text": "522",
+        "conf": 0.8167
+       }
+      ],
+      "tier2": [
+       {
+        "text": "44P2322",
+        "conf": 0.0529
+       }
+      ],
+      "tier3": [
+       {
+        "text": "49P52982",
+        "conf": 0.0267
+       }
+      ]
+     },
+     "selected": {
+      "text": "LAP29BR",
+      "ocr_confidence": 0.1939,
+      "votes": 1,
+      "format_score": 100
+     },
+     "matched_gt_index": null,
+     "is_fp": true
+    },
+    {
+     "plate_id": 2,
+     "bbox": [
+      16,
+      0,
+      495,
+      233
+     ],
+     "raw_bbox": [
+      16,
+      0,
+      495,
+      233
+     ],
+     "yolo_confidence": 0.9487,
+     "ocr_text": "3323",
+     "ocr_confidence": 0.6475,
+     "validation_score": 20,
+     "validation": "UNVERIFIED",
+     "final_confidence": 0.4685,
+     "status": "LOW_CONFIDENCE",
+     "strict_format": false,
+     "state_code": null,
+     "candidates": {
+      "tier1": [
+       {
+        "text": "3P2822",
+        "conf": 0.1559
+       }
+      ],
+      "tier6": [
+       {
+        "text": "282",
+        "conf": 0.264
+       }
+      ],
+      "tier2": [
+       {
+        "text": "3323",
+        "conf": 0.546
+       }
+      ],
+      "tier3": [
+       {
+        "text": "3323",
+        "conf": 0.7491
+       }
+      ]
+     },
+     "selected": {
+      "text": "3323",
+      "ocr_confidence": 0.6475,
+      "votes": 2,
+      "format_score": 20
+     },
+     "matched_gt_index": 0,
+     "is_fp": false
+    },
+    {
+     "plate_id": 3,
+     "bbox": [
+      23,
+      17,
+      495,
+      129
+     ],
+     "raw_bbox": [
+      23,
+      17,
+      495,
+      129
+     ],
+     "yolo_confidence": 0.8391,
+     "ocr_text": "APZ9BP",
+     "ocr_confidence": 0.9167,
+     "validation_score": 85,
+     "validation": "INDIAN_PLATE",
+     "final_confidence": 0.89,
+     "status": "HIGH_CONFIDENCE",
+     "strict_format": false,
+     "state_code": "AP",
+     "candidates": {
+      "tier1": [
+       {
+        "text": "APZ9BP",
+        "conf": 0.9167
+       }
+      ]
+     },
+     "selected": {
+      "text": "APZ9BP",
+      "ocr_confidence": 0.9167,
+      "votes": 1,
+      "format_score": 85
+     },
+     "matched_gt_index": null,
+     "is_fp": true
+    },
+    {
+     "plate_id": 4,
+     "bbox": [
+      40,
+      38,
+      500,
+      253
+     ],
+     "raw_bbox": [
+      40,
+      38,
+      500,
+      253
+     ],
+     "yolo_confidence": 0.7594,
+     "ocr_text": "",
+     "ocr_confidence": 0.0,
+     "validation_score": 0,
+     "validation": "UNVERIFIED",
+     "final_confidence": 0.0,
+     "status": "OCR_FAILED",
+     "strict_format": null,
+     "state_code": null,
+     "candidates": {},
+     "selected": null,
+     "matched_gt_index": null,
+     "is_fp": true
+    },
+    {
+     "plate_id": 5,
+     "bbox": [
+      0,
+      15,
+      392,
+      248
+     ],
+     "raw_bbox": [
+      0,
+      15,
+      392,
+      248
+     ],
+     "yolo_confidence": 0.5423,
+     "ocr_text": "",
+     "ocr_confidence": 0.0,
+     "validation_score": 0,
+     "validation": "UNVERIFIED",
+     "final_confidence": 0.0,
+     "status": "OCR_FAILED",
+     "strict_format": null,
+     "state_code": null,
+     "candidates": {},
+     "selected": null,
+     "matched_gt_index": null,
+     "is_fp": true
+    }
+   ],
+   "raw_passes": [
+    {
+     "text": "LAP29BR",
+     "conf": 0.1939,
+     "shape": [
+      313,
+      853
+     ],
+     "attributed_to": [
+      1
+     ]
+    },
+    {
+     "text": "522",
+     "conf": 0.8167,
+     "shape": [
+      909,
+      909
+     ],
+     "attributed_to": [
+      1
+     ]
+    },
+    {
+     "text": "44P2322",
+     "conf": 0.0529,
+     "shape": [
+      313,
+      853
+     ],
+     "attributed_to": [
+      1
+     ]
+    },
+    {
+     "text": "49P52982",
+     "conf": 0.0267,
+     "shape": [
+      313,
+      853
+     ],
+     "attributed_to": [
+      1
+     ]
+    },
+    {
+     "text": "3P2822",
+     "conf": 0.1559,
+     "shape": [
+      437,
+      900
+     ],
+     "attributed_to": [
+      2
+     ]
+    },
+    {
+     "text": "282",
+     "conf": 0.264,
+     "shape": [
+      1001,
+      931
+     ],
+     "attributed_to": [
+      2
+     ]
+    },
+    {
+     "text": "3323",
+     "conf": 0.546,
+     "shape": [
+      437,
+      900
+     ],
+     "attributed_to": [
+      2
+     ]
+    },
+    {
+     "text": "3323",
+     "conf": 0.7491,
+     "shape": [
+      437,
+      900
+     ],
+     "attributed_to": [
+      2
+     ]
+    },
+    {
+     "text": "APZ9BP",
+     "conf": 0.9167,
+     "shape": [
+      213,
+      727
+     ],
+     "attributed_to": [
+      3
+     ]
+    }
+   ],
+   "crops": [
+    {
+     "file": "Cars114__gt0_detp2.png",
+     "gt_index": 0,
+     "source": "det",
+     "plate_id": 2,
+     "bbox": [
+      16,
+      0,
+      495,
+      233
+     ],
+     "w": 479,
+     "h": 233,
+     "aspect": 2.056
+    }
+   ],
+   "plates_detected": 5,
+   "elapsed_ms": 3659.2
+  }
+ ]
+}
