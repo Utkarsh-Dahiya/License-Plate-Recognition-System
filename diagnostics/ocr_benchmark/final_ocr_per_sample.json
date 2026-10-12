@@ -1,0 +1,6 @@
+{
+  "status": "blocked",
+  "note": "Per-sample comparative results are unavailable because the comparative OCR benchmark did not run (verified_readable=2 < 50 threshold). This file intentionally lists no per-sample accuracy to avoid fabricating results. It will be populated by the benchmark once >= 50 verified readable plates exist.",
+  "sample_count": 2,
+  "per_sample": []
+}

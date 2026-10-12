@@ -1,0 +1,44 @@
+{
+  "status": "blocked",
+  "blocked_reason": "verified_readable_ground_truth < 50 required for comparative benchmark",
+  "benchmark_run": false,
+  "metrics_available": false,
+  "note": "No comparative OCR benchmark was executed. Running one on fewer than 50 verified readable plates would produce unreliable results. See FINAL_OCR_EVALUATION_REPORT.md. All accuracy/latency fields are intentionally null.",
+  "generated_from": "live rescan of diagnostics/ocr_benchmark/*.json (method: recalc_counts.py)",
+  "dataset": {
+    "total_candidates": 62,
+    "verified_readable": 2,
+    "pending_transcription": 60,
+    "marked_unreadable": 0,
+    "missing_crops": 0,
+    "duplicate_or_invalid_ids": 0,
+    "threshold_required": 50,
+    "additional_verified_needed": 48
+  },
+  "verified_entries": [
+    { "id": "V0034", "ground_truth": "9M17408FV1232", "verified": true },
+    { "id": "V0333", "ground_truth": "EHK1642", "verified": true }
+  ],
+  "candidates_evaluated": [],
+  "baseline": { "name": "EasyOCR (production)", "results": null },
+  "alternatives": [],
+  "metrics": {
+    "exact_match_accuracy": null,
+    "character_level_accuracy": null,
+    "ocr_failure_rate": null,
+    "avg_latency_ms": null,
+    "p50_latency_ms": null,
+    "p95_latency_ms": null,
+    "single_line_vs_two_line": null,
+    "by_resolution": null,
+    "model_init_time_ms": null,
+    "memory_usage": null,
+    "sample_count": 2,
+    "methodology": "not run: below threshold"
+  },
+  "known_failure_case": {
+    "case": "GJ08DJ3136 -> 76J080J3136",
+    "tested": false,
+    "reason": "no matching image crop and no verified ground-truth label exist in any data file; appears only as prose in BENCHMARK_REPORT.md and a note in results.json"
+  }
+}

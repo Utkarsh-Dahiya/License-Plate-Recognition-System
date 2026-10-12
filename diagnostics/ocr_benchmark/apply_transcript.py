@@ -61,7 +61,8 @@ def main():
         p["ground_truth_source"] = "manual_transcription"
         filled += 1
 
-    verified = [p for p in plates if p.get("verified") and p.get("ground_truth_text")]
+    verified = [p for p in plates_dict.values()
+                if p.get("verified") and p.get("ground_truth_text")]
     gt["counts"]["verified_readable"] = len(verified)
     gt["counts"]["marked_unreadable"] = unreadable
     gt["counts"]["still_pending"] = skipped

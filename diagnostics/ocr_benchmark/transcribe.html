@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plate Transcription Reviewer</title>
+<style>
+:root{
+  --bg:#0e1014; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+  --fg:#e7e9ee; --mut:#9aa3b2; --acc:#4f8cff; --ok:#3ecf8e; --warn:#e0a458;
+  --bad:#e0566b; --rev:#b98cff;
+}
+*{box-sizing:border-box}
+.hidden{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.45 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+  display:flex;flex-direction:column}
+header{background:#12151c;border-bottom:1px solid var(--line);
+  padding:8px 14px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+header h1{font-size:15px;margin:0;font-weight:700}
+.tag{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:700;
+  background:#2a2f3a;color:var(--mut)}
+.tag.srv{background:#173a2b;color:var(--ok)}
+.tag.file{background:#3a341f;color:var(--warn)}
+.tag.verified{background:#1d3a6b;color:#9dc0ff}
+.tag.saved{background:#133a2b;color:var(--ok)}
+.tag.pending{background:#3a341f;color:var(--warn)}
+.tag.bad{background:#43202a;color:var(--bad)}
+.tag.rev{background:#33224a;color:var(--rev)}
+.tag.warn{background:#3a341f;color:var(--warn)}
+.progress{font-size:12px;color:var(--mut)}
+.progress b{color:var(--fg)}
+main{flex:1;display:flex;min-height:0}
+aside{width:250px;min-width:250px;background:var(--panel);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;min-height:0}
+.filters{padding:8px;display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid var(--line)}
+.filters button{flex:1 1 auto;font-size:11px;padding:5px 6px}
+.jump{padding:8px;border-bottom:1px solid var(--line);display:flex;gap:6px}
+.jump input{flex:1}
+#list{overflow:auto;flex:1}
+.li{padding:7px 10px;border-bottom:1px solid #20242e;cursor:pointer;
+  display:flex;gap:8px;align-items:center;font-size:12px}
+.li:hover{background:var(--panel2)}
+.li.active{background:#22304a;border-left:3px solid var(--acc)}
+.li .dot{width:9px;height:9px;border-radius:50%;flex:none;background:#3a4150}
+.li.pending .dot{background:var(--warn)}
+.li.saved .dot{background:var(--ok)}
+.li.unreadable .dot{background:var(--bad)}
+.li.review .dot{background:var(--rev)}
+.li.verified .dot{background:#2f6fdd}
+.li .idx{color:var(--mut);min-width:26px}
+.li .id{font-weight:600}
+.li .txt{color:var(--mut);margin-left:auto;font-family:ui-monospace,monospace}
+.li .lk{color:#5c6572;font-size:10px}
+.view{flex:1;display:flex;flex-direction:column;min-width:0}
+.stage{flex:1;position:relative;background:
+  repeating-conic-gradient(#15181f 0% 25%,#10131a 0% 50%) 50%/22px 22px;
+  overflow:hidden;display:flex;align-items:center;justify-content:center}
+.stage .missing{align-self:center;color:var(--bad);text-align:center;
+  padding:30px;font-size:15px}
+.stage .missing code{display:block;margin-top:8px;color:var(--mut);font-size:12px}
+.stage img{max-width:100%;max-height:100%;transform-origin:center left;
+  image-rendering:auto;transition:filter .05s}
+.imgtools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+  padding:8px 12px;background:var(--panel);border-top:1px solid var(--line)}
+.imgtools label{font-size:11px;color:var(--mut);display:flex;gap:6px;align-items:center}
+.imgtools input[type=range]{width:80px;accent-color:var(--acc)}
+.entry{padding:12px 14px;background:var(--panel2);border-top:1px solid var(--line);
+  display:flex;flex-direction:column;gap:10px}
+.meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mut)}
+.meta b{color:var(--fg)}
+.hintrow{font-size:12px;color:#6b7280;min-height:22px}
+.hintrow code{color:#8b93a1;background:#0c0e12;padding:1px 6px;border-radius:4px}
+.warnrow{font-size:12px;color:var(--warn);display:none}
+.warnrow.show{display:block}
+.gtrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#gt{flex:1;min-width:220px;background:#0c0e12;border:1px solid var(--line);
+  color:var(--fg);border-radius:8px;padding:11px 12px;
+  font:700 20px/1.2 ui-monospace,Consolas,monospace;letter-spacing:2px}
+#gt:focus{outline:none;border-color:var(--acc)}
+#gt:disabled{opacity:.6}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+button{background:var(--acc);color:#fff;border:0;border-radius:7px;
+  padding:8px 13px;font-weight:600;cursor:pointer;font-size:13px}
+button.sec{background:#2a2f3a;color:var(--fg)}
+button.warn{background:var(--warn);color:#20180a}
+button.bad{background:var(--bad)}
+button.rev{background:var(--rev);color:#1a1030}
+button.ok{background:var(--ok);color:#052318}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:hover:not(:disabled){filter:brightness(1.08)}
+.statusline{font-size:12px;color:var(--mut)}
+.statusline.ok{color:var(--ok)} .statusline.bad{color:var(--bad)}
+.statusline.warn{color:var(--warn)}
+.shortcuts{font-size:11px;color:#6b7280;padding:6px 14px;background:#0c0e12;
+  border-top:1px solid var(--line)}
+.shortcuts kbd{background:#20242e;border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:4px;padding:0 5px;font-family:ui-monospace,monospace;color:#c7ccd6}
+.protect{background:#2a2410;border:1px solid #574a1c;color:var(--warn);
+  padding:8px 10px;border-radius:8px;font-size:12px;display:none}
+.protect.show{display:block}
+</style>
+</head>
+<body>
+<header id='topHeader'>
+  <h1>Plate Transcription Reviewer</h1>
+  <span id='srvtag' class='tag'></span>
+  <span class='progress'>Done <b id='cSaved'>0</b> | Unreadable <b id='cUnread'>0</b> | Review <b id='cReview'>0</b> | Pending <b id='cPending'>0</b> | <b id='cTot'>0</b> total</span>
+  <span style='margin-left:auto'></span>
+  <button class='sec' id='btnImport' title='Import a previously exported answers JSON'>Import JSON</button>
+  <input id='fileInput' type='file' accept='application/json,.json' style='display:none'>
+  <button class='sec' id='btnExport'>Export answers JSON</button>
+  <span id='saveMsg' class='tag'></span>
+</header>
+<main>
+  <aside>
+    <div class='filters'>
+      <button class='sec' data-filter='all'>All</button>
+      <button class='sec' data-filter='pending'>Pending</button>
+      <button class='sec' data-filter='saved'>Saved</button>
+      <button class='sec' data-filter='unreadable'>Unreadable</button>
+      <button class='sec' data-filter='review'>Review</button>
+      <button class='sec' data-filter='verified'>Verified</button>
+    </div>
+    <div class='jump'>
+      <input id='jumpInput' type='text' placeholder='Jump to # (e.g. 12) or ID'>
+      <button class='sec' id='btnJump'>Go</button>
+    </div>
+    <div id='list'></div>
+  </aside>
+  <section class='view'>
+    <div class='stage' id='stage'>
+      <img id='img' alt='crop'>
+      <div class='missing' id='missing'></div>
+    </div>
+    <div class='imgtools'>
+      <button class='sec' id='btnZoomIn' title='Zoom in (+, Ctrl+=)'>+</button>
+      <button class='sec' id='btnZoomOut' title='Zoom out (-)'>-</button>
+      <button class='sec' id='btnFit' title='Fit to screen (0)'>Fit</button>
+      <button class='sec' id='btnReset' title='Reset image controls'>Reset</button>
+      <label>Bright <input id='bri' type='range' min='20' max='300' value='100'></label>
+      <label>Contrast <input id='con' type='range' min='20' max='300' value='100'></label>
+      <label><input id='gray' type='checkbox'> Grayscale</label>
+    </div>
+    <div class='entry'>
+      <div class='meta'>
+        <span>#<b id='mIdx'>-</b>/<b id='mTot'>-</b></span>
+        <span>ID <b id='mId'>-</b></span>
+        <span><b id='mW'>-</b> x <b id='mH'>-</b></span>
+        <span>AR <b id='mAr'>-</b></span>
+        <span>YOLO <b id='mYolo'>-</b></span>
+        <span>src <b id='mSrc'>-</b></span>
+        <span id='mStatus' class='tag'>-</span>
+      </div>
+      <div class='hintrow'>OCR hint (NOT ground truth): <code id='mHint'>-</code></div>
+      <div id='protectBox' class='protect'>This entry is already VERIFIED. Editing requires explicit confirmation and will overwrite the verified record.</div>
+      <div class='gtrow'>
+        <input id='gt' type='text' autocomplete='off' spellcheck='false' placeholder='type exact plate text (blank = skip)'>
+        <button class='ok' id='btnSave' title='Save (Ctrl+S)'>Save</button>
+      </div>
+      <div class='actions'>
+        <button class='sec' id='btnPrev' title='Previous (left arrow)'>Prev</button>
+        <button class='sec' id='btnNext' title='Next (right arrow)'>Next</button>
+        <button class='warn' id='btnUnread' title='Mark unreadable (U)'>Unreadable</button>
+        <button class='rev' id='btnReview' title='Review needed (R)'>Review</button>
+        <button class='sec' id='btnModify' title='Unlock this verified entry for editing (requires confirmation)' style='display:none'>Modify</button>
+        <button class='sec' id='btnClear'>Clear</button>
+        <button class='ok' id='btnVerify' title='Explicitly mark verified (V)'>Verify</button>
+      </div>
+      <div id='warn' class='warnrow'></div>
+      <div id='status' class='statusline'></div>
+    </div>
+    <div class='shortcuts'>
+      <kbd>Left/Right</kbd> prev/next | <kbd>Ctrl+S</kbd> save | <kbd>Ctrl+Enter</kbd> save+next | <kbd>U</kbd> unreadable | <kbd>R</kbd> review | <kbd>V</kbd> verify | <kbd>+ / -</kbd> zoom | <kbd>0</kbd> fit. Shortcuts are disabled while typing in the text box (<kbd>Ctrl+S</kbd> still saves).
+    </div>
+  </section>
+</main>
+
+
+<script src='transcribe_data.js'></script>
+<script src='transcribe.js'></script>
+</body>
+</html>
+
