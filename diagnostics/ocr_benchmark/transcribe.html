@@ -159,6 +159,7 @@ button:hover:not(:disabled){filter:brightness(1.08)}
         <input id='gt' type='text' autocomplete='off' spellcheck='false' placeholder='type exact plate text (blank = skip)'>
         <button class='ok' id='btnSave' title='Save (Ctrl+S)'>Save</button>
       </div>
+       <div class='hintrow' style='color:var(--ok)'><kbd>A</kbd> Accept OCR suggestion (loads into field; Ctrl+S saves) — suggestion only, never GT.</div>
       <div class='actions'>
         <button class='sec' id='btnPrev' title='Previous (left arrow)'>Prev</button>
         <button class='sec' id='btnNext' title='Next (right arrow)'>Next</button>
@@ -166,13 +167,14 @@ button:hover:not(:disabled){filter:brightness(1.08)}
         <button class='rev' id='btnReview' title='Review needed (R)'>Review</button>
         <button class='sec' id='btnModify' title='Unlock this verified entry for editing (requires confirmation)' style='display:none'>Modify</button>
         <button class='sec' id='btnClear'>Clear</button>
+        <button class='ok' id='btnAccept' title='Accept OCR suggestion into the field (A)'>Accept OCR suggestion</button>
         <button class='ok' id='btnVerify' title='Explicitly mark verified (V)'>Verify</button>
       </div>
       <div id='warn' class='warnrow'></div>
       <div id='status' class='statusline'></div>
     </div>
     <div class='shortcuts'>
-      <kbd>Left/Right</kbd> prev/next | <kbd>Ctrl+S</kbd> save | <kbd>Ctrl+Enter</kbd> save+next | <kbd>U</kbd> unreadable | <kbd>R</kbd> review | <kbd>V</kbd> verify | <kbd>+ / -</kbd> zoom | <kbd>0</kbd> fit. Shortcuts are disabled while typing in the text box (<kbd>Ctrl+S</kbd> still saves).
+      <kbd>Left/Right</kbd> prev/next | <kbd>Ctrl+S</kbd> save | <kbd>Ctrl+Enter</kbd> save+next | <kbd>A</kbd> accept OCR suggestion | <kbd>U</kbd> unreadable | <kbd>R</kbd> review | <kbd>V</kbd> verify | <kbd>+ / -</kbd> zoom | <kbd>0</kbd> fit. Shortcuts are disabled while typing in the text box (<kbd>Ctrl+S</kbd> still saves).
     </div>
   </section>
 </main>

@@ -8,7 +8,10 @@
     "candidates_selected": 60,
     "already_verified": 2,
     "pending_transcription": 60,
-    "total_in_file": 62
+    "total_in_file": 62,
+    "verified_readable": 2,
+    "marked_unreadable": 0,
+    "still_pending": 62
   },
   "plates": {
     "R001": {

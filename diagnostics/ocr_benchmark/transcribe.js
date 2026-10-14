@@ -133,6 +133,15 @@ function saveCurrent() {
   updateCounts();
 }
 
+function acceptSuggestion() {
+  var i = currentIdx;
+  var e = ENTRIES[i];
+  var hint = e ? (e.ocr_text || '').trim() : '';
+  if (!hint) { showMsg('No OCR suggestion for this entry.', 'mut'); return; }
+  gt.value = hint;
+  showMsg('OCR suggestion loaded into the field (A). Press Ctrl+S to save.', 'ok');
+}
+
 function markUnreadable(i) {
   if (isLocked(i)) { showMsg('Verified entries are locked. Click Modify to change.', 'warn'); return; }
   var d = draftOf(i);
@@ -345,6 +354,7 @@ function toggleModifyVerified() {
     showMsg('Unlocked for editing. Type the exact text, then Save (with confirmation).', 'warn');
   } else {
     unlocked[i] = false;
+    DRAFT[i] = blank(i);   // drop the previous draft so the list/entry reflect the locked GT record
     showMsg('Re-locked. Verified value restored in the field.', 'ok');
   }
   renderEntry();
@@ -547,6 +557,7 @@ document.addEventListener('keydown', function (e) {
     case 'u': case 'U': e.preventDefault(); markUnreadable(currentIdx); break;
     case 'r': case 'R': e.preventDefault(); markReview(currentIdx); break;
     case 'v': case 'V': e.preventDefault(); verify(currentIdx); break;
+    case 'a': case 'A': e.preventDefault(); acceptSuggestion(); break;
     case 'Enter': e.preventDefault(); saveText(); move(1); break;
     case '+': case '=': e.preventDefault(); zoomBy(1.25); break;
     case '-': case '_': e.preventDefault(); zoomBy(0.8); break;
@@ -561,6 +572,7 @@ $('btnUnread').addEventListener('click', function () { markUnreadable(currentIdx
 $('btnReview').addEventListener('click', function () { markReview(currentIdx); });
 $('btnClear').addEventListener('click', function () { clearEntry(currentIdx); });
 $('btnVerify').addEventListener('click', function () { verify(currentIdx); });
+$('btnAccept').addEventListener('click', acceptSuggestion);
 $('btnModify').addEventListener('click', toggleModifyVerified);
 $('btnExport').addEventListener('click', exportJSON);
 $('btnImport').addEventListener('click', function () { $('fileInput').click(); });
